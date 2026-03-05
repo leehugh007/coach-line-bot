@@ -1,0 +1,14 @@
+{
+  "name": "coach-line-bot",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "@upstash/redis": "^1.36.3",
+    "next": "^14.2.0"
+  }
+}
