@@ -11,7 +11,7 @@
  */
 
 import { verifySignature, sendMessage, getProfile, getGroupMemberProfile } from '@/lib/line';
-import { handleMessage, isCoachableQuestion, classifyQuestion, generateDraftResponse } from '@/lib/ai';
+import { handleMessage, basicMessageFilter, aiDetectQuestion, generateDraftResponse } from '@/lib/ai';
 import { getChatHistory, addChatMessage, formatChatForGemini } from '@/lib/chat';
 import { savePendingItem } from '@/lib/pending';
 import {
@@ -119,10 +119,14 @@ async function handleGroupMessage(source, userId, text) {
     return;
   }
 
-  // 2. 偵測需要教練回應的問題
-  if (!isCoachableQuestion(trimmed)) return;
+  // 2. 基本篩選：排除明顯不是問題的短訊息
+  if (!basicMessageFilter(trimmed)) return;
 
-  console.log(`[Group-Q] Coachable question detected from ${userId?.substring(0, 8)}`);
+  // 3. AI 判斷：這則訊息是否需要教練回應
+  const detection = await aiDetectQuestion(trimmed);
+  if (!detection || !detection.isQuestion) return;
+
+  console.log(`[Group-Q] AI detected question from ${userId?.substring(0, 8)}: topic=${detection.topic}, reason=${detection.reason}`);
 
   try {
     // 取得學員名稱
@@ -148,8 +152,8 @@ async function handleGroupMessage(source, userId, text) {
       if (parts.length > 0) studentContext = parts.join('，');
     }
 
-    // 分類問題
-    const topic = classifyQuestion(trimmed);
+    // 用 AI 偵測到的分類
+    const topic = detection.topic || 'other';
 
     // 產生草稿回覆
     const draft = await generateDraftResponse(trimmed, studentContext);
