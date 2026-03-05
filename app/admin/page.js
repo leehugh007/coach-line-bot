@@ -3,6 +3,12 @@
 import { useState } from 'react';
 
 export default function AdminPage() {
+  // 密碼閘門
+  const [password, setPassword] = useState('');
+  const [unlocked, setUnlocked] = useState(false);
+  const [pwError, setPwError] = useState('');
+
+  // 管理功能
   const [adminKey, setAdminKey] = useState('');
   const [fileData, setFileData] = useState(null);
   const [fileName, setFileName] = useState('');
@@ -11,6 +17,27 @@ export default function AdminPage() {
   const [statusResult, setStatusResult] = useState(null);
   const [students, setStudents] = useState([]);
   const [loading, setLoading] = useState('');
+
+  // 密碼驗證：用 admin key 呼叫 GET API 驗證
+  async function handleUnlock(e) {
+    e.preventDefault();
+    if (!password.trim()) { setPwError('請輸入管理密鑰'); return; }
+    setPwError('');
+    try {
+      const res = await fetch('/api/admin/import', {
+        headers: { 'x-admin-key': password.trim() },
+      });
+      if (res.status === 401) {
+        setPwError('密鑰錯誤，請重新輸入');
+        return;
+      }
+      // 驗證通過，解鎖並帶入 admin key
+      setAdminKey(password.trim());
+      setUnlocked(true);
+    } catch (err) {
+      setPwError('連線失敗：' + err.message);
+    }
+  }
 
   function handleFile(e) {
     const file = e.target.files[0];
@@ -46,12 +73,12 @@ export default function AdminPage() {
       });
       const result = await res.json();
       if (res.ok && result.ok) {
-        setImportStatus({ type: 'success', msg: '✅ ' + result.message });
+        setImportStatus({ type: 'success', msg: result.message });
       } else {
-        setImportStatus({ type: 'error', msg: '❌ ' + (result.error || '未知錯誤') });
+        setImportStatus({ type: 'error', msg: result.error || '未知錯誤' });
       }
     } catch (err) {
-      setImportStatus({ type: 'error', msg: '❌ 連線失敗：' + err.message });
+      setImportStatus({ type: 'error', msg: '連線失敗：' + err.message });
     }
     setLoading('');
   }
@@ -68,12 +95,12 @@ export default function AdminPage() {
         setStatusResult({ type: 'info', total: result.total, matched: result.matched, unmatched: result.unmatched });
         setStudents(result.students || []);
       } else if (res.status === 401) {
-        setStatusResult({ type: 'error', msg: '❌ 密鑰錯誤，請確認 Admin Key' });
+        setStatusResult({ type: 'error', msg: '密鑰錯誤，請確認 Admin Key' });
       } else {
-        setStatusResult({ type: 'error', msg: '❌ ' + (result.error || '未知錯誤') });
+        setStatusResult({ type: 'error', msg: result.error || '未知錯誤' });
       }
     } catch (err) {
-      setStatusResult({ type: 'error', msg: '❌ 連線失敗：' + err.message });
+      setStatusResult({ type: 'error', msg: '連線失敗：' + err.message });
     }
     setLoading('');
   }
@@ -84,26 +111,44 @@ export default function AdminPage() {
     info: { bg: '#E3F2FD', border: '#90CAF9', text: '#1565C0' },
   };
 
+  // ===== 密碼閘門畫面 =====
+  if (!unlocked) {
+    return (
+      <div style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif', background: '#f5f5f5', minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ background: 'white', borderRadius: 16, padding: 40, boxShadow: '0 4px 20px rgba(0,0,0,0.1)', maxWidth: 400, width: '100%', textAlign: 'center' }}>
+          <div style={{ fontSize: 48, marginBottom: 16 }}>🔒</div>
+          <h1 style={{ fontSize: 20, marginBottom: 8 }}>休校長小幫手</h1>
+          <p style={{ color: '#888', fontSize: 14, marginBottom: 24 }}>管理後台需要密鑰才能進入</p>
+          <form onSubmit={handleUnlock}>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => { setPassword(e.target.value); setPwError(''); }}
+              placeholder="請輸入管理密鑰"
+              autoFocus
+              style={{ width: '100%', padding: '12px 16px', border: '1px solid #ddd', borderRadius: 8, fontSize: 15, marginBottom: 12 }}
+            />
+            {pwError && (
+              <div style={{ color: '#C62828', fontSize: 13, marginBottom: 12 }}>{pwError}</div>
+            )}
+            <button
+              type="submit"
+              style={{ width: '100%', padding: '12px', border: 'none', borderRadius: 8, fontSize: 15, fontWeight: 600, cursor: 'pointer', background: '#4CAF50', color: 'white' }}
+            >
+              進入後台
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  // ===== 管理後台主畫面 =====
   return (
     <div style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif', background: '#f5f5f5', minHeight: '100vh', padding: '20px' }}>
       <div style={{ maxWidth: 700, margin: '0 auto' }}>
         <h1 style={{ textAlign: 'center', marginBottom: 8, fontSize: 24 }}>休校長小幫手 管理後台</h1>
         <p style={{ textAlign: 'center', color: '#888', marginBottom: 30, fontSize: 14 }}>學員自我介紹匯入 & 比對狀態查詢</p>
-
-        {/* 設定 */}
-        <div style={{ background: 'white', borderRadius: 12, padding: 24, marginBottom: 20, boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}>
-          <h2 style={{ fontSize: 18, marginBottom: 16, paddingBottom: 8, borderBottom: '2px solid #4CAF50', display: 'inline-block' }}>連線設定</h2>
-          <div>
-            <label style={{ display: 'block', fontWeight: 600, marginBottom: 6, fontSize: 14 }}>管理密鑰 (Admin Key)</label>
-            <input
-              type="password"
-              value={adminKey}
-              onChange={(e) => setAdminKey(e.target.value)}
-              placeholder="輸入你在 Vercel 設定的 ADMIN_API_KEY"
-              style={{ width: '100%', padding: '10px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 15 }}
-            />
-          </div>
-        </div>
 
         {/* 匯入 */}
         <div style={{ background: 'white', borderRadius: 12, padding: 24, marginBottom: 20, boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}>
@@ -112,7 +157,7 @@ export default function AdminPage() {
           <input type="file" accept=".json" onChange={handleFile} style={{ marginBottom: 8 }} />
           {fileName && (
             <div style={{ background: '#F5F5F5', padding: '10px 14px', borderRadius: 8, marginTop: 8, fontSize: 13, color: '#666' }}>
-              📄 {fileName} — 共 {studentCount} 筆學員資料
+              {fileName} — 共 {studentCount} 筆學員資料
             </div>
           )}
           <div style={{ marginTop: 16 }}>
@@ -121,7 +166,7 @@ export default function AdminPage() {
               disabled={!fileData || loading === 'import'}
               style={{ padding: '12px 28px', border: 'none', borderRadius: 8, fontSize: 15, fontWeight: 600, cursor: fileData ? 'pointer' : 'not-allowed', background: fileData ? '#4CAF50' : '#ccc', color: 'white' }}
             >
-              {loading === 'import' ? '⏳ 匯入中...' : '匯入資料'}
+              {loading === 'import' ? '匯入中...' : '匯入資料'}
             </button>
           </div>
           {importStatus && (
@@ -140,7 +185,7 @@ export default function AdminPage() {
             disabled={loading === 'status'}
             style={{ padding: '12px 28px', border: 'none', borderRadius: 8, fontSize: 15, fontWeight: 600, cursor: 'pointer', background: '#2196F3', color: 'white' }}
           >
-            {loading === 'status' ? '⏳ 查詢中...' : '查詢狀態'}
+            {loading === 'status' ? '查詢中...' : '查詢狀態'}
           </button>
 
           {statusResult && statusResult.type === 'error' && (
@@ -175,7 +220,7 @@ export default function AdminPage() {
                         background: s.matched ? '#C8E6C9' : '#FFF9C4',
                         color: s.matched ? '#2E7D32' : '#F57F17'
                       }}>
-                        {s.matched ? '已配對 ✓' : '等待中'}
+                        {s.matched ? '已配對' : '等待中'}
                       </span>
                     </div>
                   ))}
