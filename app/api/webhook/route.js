@@ -11,8 +11,9 @@
  */
 
 import { verifySignature, sendMessage, getProfile, getGroupMemberProfile } from '@/lib/line';
-import { handleMessage } from '@/lib/ai';
+import { handleMessage, isCoachableQuestion, classifyQuestion, generateDraftResponse } from '@/lib/ai';
 import { getChatHistory, addChatMessage, formatChatForGemini } from '@/lib/chat';
+import { savePendingItem } from '@/lib/pending';
 import {
   looksLikeIntroduction, processIntroduction,
   getUser, recordInteraction, buildUserContext,
@@ -94,33 +95,95 @@ async function processEvent(event) {
 
 async function handleGroupMessage(source, userId, text) {
   const trimmed = text.trim();
+  const groupId = source.groupId || source.roomId;
 
-  // 只偵測自我介紹，其他訊息全部忽略
-  if (!looksLikeIntroduction(trimmed)) return;
+  // 1. 偵測自我介紹（優先）
+  if (looksLikeIntroduction(trimmed)) {
+    console.log(`[Group] Self-intro detected from ${userId?.substring(0, 8)} in group ${groupId?.substring(0, 8)}`);
+    try {
+      await processIntroduction(userId, trimmed);
+      const profile = groupId
+        ? await getGroupMemberProfile(groupId, userId)
+        : await getProfile(userId);
+      if (profile?.displayName) {
+        const user = await getUser(userId);
+        if (user) {
+          user.lineDisplayName = profile.displayName;
+          const { saveUser } = await import('@/lib/user');
+          await saveUser(userId, user);
+        }
+      }
+    } catch (err) {
+      console.error('[Group] Intro processing error:', err);
+    }
+    return;
+  }
 
-  console.log(`[Group] Self-intro detected from ${userId?.substring(0, 8)} in group ${source.groupId?.substring(0, 8)}`);
+  // 2. 偵測需要教練回應的問題
+  if (!isCoachableQuestion(trimmed)) return;
 
-  // 背景處理：抽取自介資料並存入
+  console.log(`[Group-Q] Coachable question detected from ${userId?.substring(0, 8)}`);
+
   try {
-    await processIntroduction(userId, trimmed);
+    // 取得學員名稱
+    let studentName = '未知';
+    try {
+      const profile = groupId
+        ? await getGroupMemberProfile(groupId, userId)
+        : await getProfile(userId);
+      if (profile?.displayName) studentName = profile.displayName;
+    } catch (e) {
+      console.error('[Group-Q] Profile error:', e);
+    }
 
-    // 順便取得 LINE 顯示名稱，存到檔案裡方便對照
-    const groupId = source.groupId || source.roomId;
-    const profile = groupId
-      ? await getGroupMemberProfile(groupId, userId)
-      : await getProfile(userId);
+    // 取得學員已知資訊（如果有）
+    let studentContext = '';
+    const user = await getUser(userId);
+    if (user?.info) {
+      const info = user.info;
+      const parts = [];
+      if (info.name) parts.push(`名字：${info.name}`);
+      if (info.job) parts.push(`職業：${info.job}`);
+      if (info.life_challenge) parts.push(`生活挑戰：${info.life_challenge}`);
+      if (parts.length > 0) studentContext = parts.join('，');
+    }
 
-    if (profile?.displayName) {
-      const user = await getUser(userId);
-      if (user) {
-        user.lineDisplayName = profile.displayName;
-        const { saveUser } = await import('@/lib/user');
-        await saveUser(userId, user);
-        console.log(`[Group] Saved displayName: ${profile.displayName} for ${userId?.substring(0, 8)}`);
+    // 分類問題
+    const topic = classifyQuestion(trimmed);
+
+    // 產生草稿回覆
+    const draft = await generateDraftResponse(trimmed, studentContext);
+    if (!draft) {
+      console.log('[Group-Q] Draft generation failed, skipping');
+      return;
+    }
+
+    // 存入待回應
+    await savePendingItem({
+      groupId,
+      userId,
+      studentName,
+      message: trimmed,
+      topic,
+      draft,
+    });
+
+    // 推播通知教練（如果有設定）
+    const coachId = process.env.COACH_USER_ID;
+    if (coachId) {
+      const topicMap = { mindset: '心態', diet: '飲食', plateau: '體重停滯', emotion: '情緒', other: '問題' };
+      const notifyText = `📋 ${studentName} 在群組提了${topicMap[topic] || ''}問題，草稿已備好。\n到後台查看：https://coach-line-bot.vercel.app/admin`;
+      try {
+        const { pushMessage } = await import('@/lib/line');
+        await pushMessage(coachId, notifyText);
+      } catch (e) {
+        console.error('[Group-Q] Push notify error:', e);
       }
     }
+
+    console.log(`[Group-Q] Pending item saved: ${studentName} (${topic})`);
   } catch (err) {
-    console.error('[Group] Intro processing error:', err);
+    console.error('[Group-Q] Processing error:', err);
   }
 }
 
