@@ -236,6 +236,13 @@ async function handleTextMessage(replyToken, userId, text) {
     );
   }
 
+  // 管理指令：查詢自己的 userId
+  if (['我的id', '我的ID', 'myid', 'my id'].includes(trimmed.toLowerCase())) {
+    return await sendMessage(replyToken, userId,
+      `你的 userId：\n${userId}`
+    );
+  }
+
   // 使用說明
   if (['怎麼用', '使用說明', '功能', '你能做什麼'].includes(trimmed)) {
     return await sendMessage(replyToken, userId,
