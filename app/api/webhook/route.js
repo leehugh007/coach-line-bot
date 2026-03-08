@@ -12,7 +12,7 @@
 
 import { verifySignature, sendMessage, getProfile, getGroupMemberProfile } from '@/lib/line';
 import { handleMessage, basicMessageFilter, aiDetectQuestion, generateDraftResponse } from '@/lib/ai';
-import { getChatHistory, addChatMessage, formatChatForGemini } from '@/lib/chat';
+import { getChatHistory, addChatMessage, formatChatForGemini, addGroupMessage, getGroupContext } from '@/lib/chat';
 import { savePendingItem } from '@/lib/pending';
 import {
   looksLikeIntroduction, processIntroduction,
@@ -97,21 +97,28 @@ async function handleGroupMessage(source, userId, text) {
   const trimmed = text.trim();
   const groupId = source.groupId || source.roomId;
 
-  // 1. 偵測自我介紹（優先）
+  // 0. 取得發言者名稱（用於 buffer 和通知）
+  let displayName = '未知';
+  try {
+    const profile = groupId
+      ? await getGroupMemberProfile(groupId, userId)
+      : await getProfile(userId);
+    if (profile?.displayName) displayName = profile.displayName;
+  } catch (e) { /* ignore */ }
+
+  // 1. 每則訊息都存入群組 buffer（不管是不是問題，都是上下文）
+  await addGroupMessage(groupId, userId, displayName, trimmed);
+
+  // 2. 偵測自我介紹（優先）
   if (looksLikeIntroduction(trimmed)) {
-    console.log(`[Group] Self-intro detected from ${userId?.substring(0, 8)} in group ${groupId?.substring(0, 8)}`);
+    console.log(`[Group] Self-intro detected from ${displayName} in group ${groupId?.substring(0, 8)}`);
     try {
       await processIntroduction(userId, trimmed);
-      const profile = groupId
-        ? await getGroupMemberProfile(groupId, userId)
-        : await getProfile(userId);
-      if (profile?.displayName) {
-        const user = await getUser(userId);
-        if (user) {
-          user.lineDisplayName = profile.displayName;
-          const { saveUser } = await import('@/lib/user');
-          await saveUser(userId, user);
-        }
+      const user = await getUser(userId);
+      if (user) {
+        user.lineDisplayName = displayName;
+        const { saveUser } = await import('@/lib/user');
+        await saveUser(userId, user);
       }
     } catch (err) {
       console.error('[Group] Intro processing error:', err);
@@ -119,27 +126,20 @@ async function handleGroupMessage(source, userId, text) {
     return;
   }
 
-  // 2. 基本篩選：排除明顯不是問題的短訊息
+  // 3. 基本篩選：排除明顯不是問題的短訊息
   if (!basicMessageFilter(trimmed)) return;
 
-  // 3. AI 判斷：這則訊息是否需要教練回應
-  const detection = await aiDetectQuestion(trimmed);
+  // 4. AI 判斷：帶上群組上下文
+  const groupContext = await getGroupContext(groupId);
+  // 排除當前這則（剛剛才存進去的最後一則）
+  const contextForDetect = groupContext.slice(0, -1);
+  const detection = await aiDetectQuestion(trimmed, contextForDetect);
   if (!detection || !detection.isQuestion) return;
 
-  console.log(`[Group-Q] AI detected question from ${userId?.substring(0, 8)}: topic=${detection.topic}, reason=${detection.reason}`);
+  const confidence = detection.confidence || 0;
+  console.log(`[Group-Q] ${displayName}: topic=${detection.topic}, confidence=${confidence}, reason=${detection.reason}`);
 
   try {
-    // 取得學員名稱
-    let studentName = '未知';
-    try {
-      const profile = groupId
-        ? await getGroupMemberProfile(groupId, userId)
-        : await getProfile(userId);
-      if (profile?.displayName) studentName = profile.displayName;
-    } catch (e) {
-      console.error('[Group-Q] Profile error:', e);
-    }
-
     // 取得學員已知資訊（如果有）
     let studentContext = '';
     const user = await getUser(userId);
@@ -166,9 +166,10 @@ async function handleGroupMessage(source, userId, text) {
     await savePendingItem({
       groupId,
       userId,
-      studentName,
+      studentName: displayName,
       message: trimmed,
       topic,
+      confidence,
       draft,
     });
 
@@ -176,7 +177,8 @@ async function handleGroupMessage(source, userId, text) {
     const coachId = process.env.COACH_USER_ID;
     if (coachId) {
       const topicMap = { mindset: '心態', diet: '飲食', plateau: '體重停滯', emotion: '情緒', other: '問題' };
-      const notifyText = `📋 ${studentName} 在群組提了${topicMap[topic] || ''}問題，草稿已備好。\n到後台查看：https://coach-line-bot.vercel.app/admin`;
+      const confidenceLabel = confidence >= 0.8 ? '🔴' : confidence >= 0.6 ? '🟡' : '⚪';
+      const notifyText = `${confidenceLabel} ${displayName} 在群組提了${topicMap[topic] || ''}問題（信心 ${Math.round(confidence * 100)}%），草稿已備好。\n到後台查看：https://coach-line-bot.vercel.app/admin`;
       try {
         const { pushMessage } = await import('@/lib/line');
         await pushMessage(coachId, notifyText);
@@ -185,7 +187,7 @@ async function handleGroupMessage(source, userId, text) {
       }
     }
 
-    console.log(`[Group-Q] Pending item saved: ${studentName} (${topic})`);
+    console.log(`[Group-Q] Pending item saved: ${displayName} (${topic}, ${Math.round(confidence * 100)}%)`);
   } catch (err) {
     console.error('[Group-Q] Processing error:', err);
   }
