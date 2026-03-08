@@ -293,6 +293,12 @@ export default function AdminPage() {
 
           {pendingItems.map((item) => (
             <div key={item.id} style={{ border: '1px solid #eee', borderRadius: 10, padding: 16, marginBottom: 12, background: '#FAFAFA' }}>
+              {/* 群組名稱 */}
+              {item.groupName && (
+                <div style={{ fontSize: 12, color: '#1565C0', fontWeight: 600, marginBottom: 6, background: '#E3F2FD', display: 'inline-block', padding: '2px 10px', borderRadius: 10 }}>
+                  {item.groupName}
+                </div>
+              )}
               {/* 標題列 */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

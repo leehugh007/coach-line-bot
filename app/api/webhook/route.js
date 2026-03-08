@@ -10,7 +10,7 @@
  * 4. 非文字訊息 → 友善提示（僅私訊）
  */
 
-import { verifySignature, sendMessage, getProfile, getGroupMemberProfile } from '@/lib/line';
+import { verifySignature, sendMessage, getProfile, getGroupMemberProfile, getGroupSummary } from '@/lib/line';
 import { handleMessage, basicMessageFilter, aiDetectQuestion, generateDraftResponse } from '@/lib/ai';
 import { getChatHistory, addChatMessage, formatChatForGemini, addGroupMessage, getGroupContext } from '@/lib/chat';
 import { savePendingItem } from '@/lib/pending';
@@ -155,6 +155,13 @@ async function handleGroupMessage(source, userId, text) {
     // 用 AI 偵測到的分類
     const topic = detection.topic || 'other';
 
+    // 取得群組名稱（用於後台顯示班別）
+    let groupName = '';
+    try {
+      const summary = await getGroupSummary(groupId);
+      if (summary?.groupName) groupName = summary.groupName;
+    } catch (e) { /* ignore */ }
+
     // 產生草稿回覆
     const draft = await generateDraftResponse(trimmed, studentContext);
     if (!draft) {
@@ -165,6 +172,7 @@ async function handleGroupMessage(source, userId, text) {
     // 存入待回應
     await savePendingItem({
       groupId,
+      groupName,
       userId,
       studentName: displayName,
       message: trimmed,
@@ -178,7 +186,8 @@ async function handleGroupMessage(source, userId, text) {
     if (coachId) {
       const topicMap = { mindset: '心態', diet: '飲食', plateau: '體重停滯', emotion: '情緒', other: '問題' };
       const confidenceLabel = confidence >= 0.8 ? '🔴' : confidence >= 0.6 ? '🟡' : '⚪';
-      const notifyText = `${confidenceLabel} ${displayName} 在群組提了${topicMap[topic] || ''}問題（信心 ${Math.round(confidence * 100)}%），草稿已備好。\n到後台查看：https://coach-line-bot.vercel.app/admin`;
+      const groupLabel = groupName ? `【${groupName}】` : '';
+      const notifyText = `${confidenceLabel}${groupLabel} ${displayName} 提了${topicMap[topic] || ''}問題（信心 ${Math.round(confidence * 100)}%），草稿已備好。\n到後台查看：https://coach-line-bot.vercel.app/admin`;
       try {
         const { pushMessage } = await import('@/lib/line');
         await pushMessage(coachId, notifyText);
