@@ -24,6 +24,24 @@ export default function AdminPage() {
   const [pendingError, setPendingError] = useState('');
   const [copiedId, setCopiedId] = useState('');
 
+  // 自動從 localStorage 恢復登入
+  useEffect(() => {
+    const saved = localStorage.getItem('coach-admin-key');
+    if (saved) {
+      // 驗證 key 是否還有效
+      fetch('/api/admin/import', { headers: { 'x-admin-key': saved } })
+        .then(res => {
+          if (res.status !== 401) {
+            setAdminKey(saved);
+            setUnlocked(true);
+          } else {
+            localStorage.removeItem('coach-admin-key');
+          }
+        })
+        .catch(() => {});
+    }
+  }, []);
+
   // 密碼驗證
   async function handleUnlock(e) {
     e.preventDefault();
@@ -39,6 +57,7 @@ export default function AdminPage() {
       }
       setAdminKey(password.trim());
       setUnlocked(true);
+      localStorage.setItem('coach-admin-key', password.trim());
     } catch (err) {
       setPwError('連線失敗：' + err.message);
     }
