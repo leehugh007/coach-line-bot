@@ -109,8 +109,10 @@ async function handleGroupMessage(source, userId, text) {
   // 1. 每則訊息都存入群組 buffer（不管是不是問題，都是上下文）
   await addGroupMessage(groupId, userId, displayName, trimmed);
 
-  // 2. 偵測自我介紹（優先）
+  // 2. 偵測自我介紹（存入用戶資料，但不 return，繼續走 AI 偵測產生草稿）
+  let isGroupIntro = false;
   if (looksLikeIntroduction(trimmed)) {
+    isGroupIntro = true;
     console.log(`[Group] Self-intro detected from ${displayName} in group ${groupId?.substring(0, 8)}`);
     try {
       await processIntroduction(userId, trimmed);
@@ -123,11 +125,11 @@ async function handleGroupMessage(source, userId, text) {
     } catch (err) {
       console.error('[Group] Intro processing error:', err);
     }
-    return;
+    // 不 return，繼續往下走產生草稿通知教練
   }
 
-  // 3. 基本篩選：排除明顯不是問題的短訊息
-  if (!basicMessageFilter(trimmed)) return;
+  // 3. 基本篩選：排除明顯不是問題的短訊息（自介直接跳過篩選）
+  if (!isGroupIntro && !basicMessageFilter(trimmed)) return;
 
   // 4. AI 判斷：帶上群組上下文
   const groupContext = await getGroupContext(groupId);
