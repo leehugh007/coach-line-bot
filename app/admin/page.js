@@ -24,6 +24,13 @@ export default function AdminPage() {
   const [pendingError, setPendingError] = useState('');
   const [copiedId, setCopiedId] = useState('');
 
+  // 手動草稿生成
+  const [manualMessage, setManualMessage] = useState('');
+  const [manualName, setManualName] = useState('');
+  const [manualDraft, setManualDraft] = useState('');
+  const [manualLoading, setManualLoading] = useState(false);
+  const [manualError, setManualError] = useState('');
+
   // 自動從 localStorage 恢復登入
   useEffect(() => {
     const saved = localStorage.getItem('coach-admin-key');
@@ -207,6 +214,31 @@ export default function AdminPage() {
     setLoading('');
   }
 
+  // === 手動草稿生成 ===
+
+  async function generateManualDraft() {
+    if (!manualMessage.trim()) { setManualError('請輸入學員的訊息'); return; }
+    setManualLoading(true);
+    setManualError('');
+    setManualDraft('');
+    try {
+      const res = await fetch('/api/admin/draft', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-admin-key': adminKey },
+        body: JSON.stringify({ message: manualMessage.trim(), studentName: manualName.trim() || undefined }),
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        setManualDraft(data.draft);
+      } else {
+        setManualError(data.error || '產生失敗');
+      }
+    } catch (err) {
+      setManualError('連線失敗：' + err.message);
+    }
+    setManualLoading(false);
+  }
+
   const colors = {
     success: { bg: '#E8F5E9', border: '#A5D6A7', text: '#2E7D32' },
     error: { bg: '#FFEBEE', border: '#EF9A9A', text: '#C62828' },
@@ -364,6 +396,74 @@ export default function AdminPage() {
               </div>
             </div>
           ))}
+        </div>
+
+        {/* ===== 手動草稿生成 ===== */}
+        <div style={{ background: 'white', borderRadius: 12, padding: 24, marginBottom: 20, boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}>
+          <h2 style={{ fontSize: 18, marginBottom: 16, paddingBottom: 8, borderBottom: '2px solid #FF9800', display: 'inline-block' }}>手動草稿生成</h2>
+          <p style={{ fontSize: 14, color: '#666', marginBottom: 16 }}>
+            貼上學員的訊息，用最新的知識庫產生回覆草稿。適合回溯處理之前的訊息。
+          </p>
+
+          <div style={{ marginBottom: 12 }}>
+            <input
+              type="text"
+              value={manualName}
+              onChange={(e) => setManualName(e.target.value)}
+              placeholder="學員名字（選填）"
+              style={{ width: '100%', padding: '10px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box', marginBottom: 8 }}
+            />
+            <textarea
+              value={manualMessage}
+              onChange={(e) => setManualMessage(e.target.value)}
+              placeholder="貼上學員的訊息..."
+              rows={4}
+              style={{ width: '100%', padding: '10px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box', resize: 'vertical', lineHeight: 1.6 }}
+            />
+          </div>
+
+          <button
+            onClick={generateManualDraft}
+            disabled={manualLoading || !manualMessage.trim()}
+            style={{
+              padding: '10px 24px', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: manualMessage.trim() ? 'pointer' : 'not-allowed',
+              background: manualMessage.trim() ? '#FF9800' : '#ccc', color: 'white',
+            }}
+          >
+            {manualLoading ? '生成中...' : '產生草稿'}
+          </button>
+
+          {manualError && (
+            <div style={{ marginTop: 12, padding: 12, borderRadius: 8, fontSize: 14, background: colors.error.bg, color: colors.error.text, border: '1px solid ' + colors.error.border }}>
+              {manualError}
+            </div>
+          )}
+
+          {manualDraft && (
+            <div style={{ marginTop: 16 }}>
+              <div style={{ background: '#E8F5E9', padding: '12px 16px', borderRadius: 8, fontSize: 14, lineHeight: 1.6, borderLeft: '3px solid #66BB6A', whiteSpace: 'pre-wrap', marginBottom: 10 }}>
+                {manualDraft}
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  onClick={() => copyDraft(manualDraft, 'manual')}
+                  style={{
+                    flex: 1, padding: '10px', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: 'pointer',
+                    background: copiedId === 'manual' ? '#66BB6A' : '#4CAF50', color: 'white',
+                  }}
+                >
+                  {copiedId === 'manual' ? '已複製！' : '複製草稿'}
+                </button>
+                <button
+                  onClick={generateManualDraft}
+                  disabled={manualLoading}
+                  style={{ padding: '10px 20px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, cursor: 'pointer', background: 'white', color: '#666' }}
+                >
+                  重新生成
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* ===== 匯入學員資料 ===== */}
