@@ -1,12 +1,12 @@
 /**
  * LINE Webhook — 休校長小幫手
  *
- * v3：加入群組自介偵測 + 預載入名稱比對
+ * v4：訊息合併 + AI 意圖分類知識注入
  *
  * 流程：
  * 1. 驗證簽名，回覆 HTTP 200
  * 2. 群組文字訊息 → 偵測自介 → 背景存入用戶檔案（不回覆）
- * 3. 私訊文字訊息 → 首次比對預載入資料 → 載入用戶資料 → AI 回覆 → 背景存標籤
+ * 3. 私訊文字訊息 → buffer 合併（8秒窗口）→ 載入用戶資料 → AI 回覆 → 背景存標籤
  * 4. 非文字訊息 → 友善提示（僅私訊）
  */
 
@@ -14,6 +14,7 @@ import { verifySignature, sendMessage, getProfile, getGroupMemberProfile, getGro
 import { handleMessage, basicMessageFilter, aiDetectQuestion, generateDraftResponse } from '@/lib/ai';
 import { getChatHistory, addChatMessage, formatChatForGemini, addGroupMessage, getGroupContext } from '@/lib/chat';
 import { savePendingItem } from '@/lib/pending';
+import { bufferMessage, isBufferReady, consumeBuffer, BATCH_DELAY, TEXT_EXTRA_DELAY } from '@/lib/queue';
 import {
   looksLikeIntroduction, processIntroduction,
   getUser, recordInteraction, buildUserContext,
@@ -25,6 +26,8 @@ import {
   getCoachingSummary, checkMilestones, getTopicCount,
 } from '@/lib/tags';
 import { NextResponse } from 'next/server';
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 export const maxDuration = 60;
 
@@ -76,9 +79,9 @@ async function processEvent(event) {
       return; // 群組中非文字訊息忽略
     }
 
-    // ===== 私訊：正常 AI 回覆流程 =====
+    // ===== 私訊：buffer 合併後 AI 回覆 =====
     if (message.type === 'text') {
-      return await handleTextMessage(replyToken, userId, message.text);
+      return await bufferAndSchedule(replyToken, userId, message.text);
     }
 
     // 其他類型
@@ -237,26 +240,25 @@ async function handleFollow(replyToken, userId) {
   await sendMessage(replyToken, userId, welcome);
 }
 
-// ===== 私訊文字處理 =====
+// ===== 私訊文字處理：buffer → 合併 → 處理 =====
 
-async function handleTextMessage(replyToken, userId, text) {
+/**
+ * 將訊息存入 buffer，排程延遲處理
+ * 多條連續訊息會被合併成一則，一起送進 AI
+ */
+async function bufferAndSchedule(replyToken, userId, text) {
   const trimmed = text.trim();
 
-  // 簡單問候
-  if (['你好', 'hi', 'hello', '嗨', '哈囉'].includes(trimmed.toLowerCase())) {
+  // 即時指令：不走 buffer，直接回覆
+  const lower = trimmed.toLowerCase();
+  if (['你好', 'hi', 'hello', '嗨', '哈囉'].includes(lower)) {
     return await sendMessage(replyToken, userId,
       '你好！我是休校長小幫手，有什麼想聊的嗎？不管是心態上的卡關還是飲食上的疑問，都可以跟我說！'
     );
   }
-
-  // 管理指令：查詢自己的 userId
-  if (['我的id', '我的ID', 'myid', 'my id'].includes(trimmed.toLowerCase())) {
-    return await sendMessage(replyToken, userId,
-      `你的 userId：\n${userId}`
-    );
+  if (['我的id', '我的ID', 'myid', 'my id'].includes(lower)) {
+    return await sendMessage(replyToken, userId, `你的 userId：\n${userId}`);
   }
-
-  // 使用說明
   if (['怎麼用', '使用說明', '功能', '你能做什麼'].includes(trimmed)) {
     return await sendMessage(replyToken, userId,
       `我可以陪你聊的話題：
@@ -269,6 +271,54 @@ async function handleTextMessage(replyToken, userId, text) {
 直接打字跟我說你的狀況就好！`
     );
   }
+
+  // 存入 buffer
+  const count = await bufferMessage(userId, { text: trimmed, replyToken });
+  console.log(`[Buffer] ${userId?.substring(0, 8)}: msg #${count} buffered "${trimmed.substring(0, 30)}..."`);
+
+  // 排程延遲處理（不阻塞 HTTP 回覆）
+  const delayedProcess = (async () => {
+    // 第一階段：等 3 秒，看有沒有新訊息
+    await sleep(BATCH_DELAY);
+    const ready = await isBufferReady(userId);
+    if (!ready) {
+      console.log(`[Buffer] ${userId?.substring(0, 8)}: not ready (new msg arrived), skipping`);
+      return;
+    }
+
+    // 第二階段：再等 5 秒讓用戶打完
+    await sleep(TEXT_EXTRA_DELAY);
+    const stillReady = await isBufferReady(userId, BATCH_DELAY + TEXT_EXTRA_DELAY - 1000);
+    if (!stillReady) {
+      console.log(`[Buffer] ${userId?.substring(0, 8)}: new msg during extra wait, skipping`);
+      return;
+    }
+
+    // 取出 buffer
+    const buffer = await consumeBuffer(userId);
+    if (!buffer || buffer.messages.length === 0) return;
+
+    console.log(`[Batch] ${userId?.substring(0, 8)}: processing ${buffer.messages.length} messages`);
+    await processBatchedMessages(userId, buffer.messages);
+  })();
+
+  if (globalThis.__nextWaitUntil) {
+    globalThis.__nextWaitUntil(delayedProcess);
+  } else {
+    await delayedProcess;
+  }
+}
+
+/**
+ * 批次處理合併後的訊息
+ * @param {string} userId
+ * @param {Array<{text: string, replyToken: string}>} messages
+ */
+async function processBatchedMessages(userId, messages) {
+  // 合併所有文字（用換行連接）
+  const combinedText = messages.map(m => m.text).join('\n');
+  // 用最後一條的 replyToken（最新的才有效）
+  const lastReplyToken = messages[messages.length - 1].replyToken;
 
   try {
     // === 並行載入：對話歷史 + 用戶資料 + 心態摘要 ===
@@ -298,9 +348,9 @@ async function handleTextMessage(replyToken, userId, text) {
 
     // === 檢查是否是自我介紹 ===
     let isIntro = false;
-    if (looksLikeIntroduction(trimmed)) {
+    if (looksLikeIntroduction(combinedText)) {
       isIntro = true;
-      processIntroduction(userId, trimmed).catch(err =>
+      processIntroduction(userId, combinedText).catch(err =>
         console.error('[User] Intro processing error:', err)
       );
       console.log(`[Intro] Detected for ${userId?.substring(0, 8)}, processing...`);
@@ -308,7 +358,6 @@ async function handleTextMessage(replyToken, userId, text) {
 
     // === 記錄互動 & 檢查里程碑 ===
     const updatedUser = await recordInteraction(userId);
-    const totalInteractions = updatedUser?.stats?.totalInteractions || 0;
     const totalTopics = await getTopicCount(userId);
 
     let milestone = null;
@@ -317,33 +366,32 @@ async function handleTextMessage(replyToken, userId, text) {
     }
 
     // === 組合 userContext ===
-    // 如果剛比對到預載入資料，重新讀取
     const contextUser = matchedPreload
       ? await getUser(userId)
       : (isIntro ? updatedUser : (user || updatedUser));
     const userContext = buildUserContext(contextUser, coachingSummary);
 
-    console.log(`[MSG] ${userId?.substring(0, 8)}: "${trimmed.substring(0, 50)}", history: ${chatHistory.length}, intro: ${isIntro}, preload: ${matchedPreload}, context: ${userContext.length}c`);
+    console.log(`[MSG] ${userId?.substring(0, 8)}: "${combinedText.substring(0, 60)}", msgs: ${messages.length}, history: ${chatHistory.length}, intro: ${isIntro}, context: ${userContext.length}c`);
 
-    // === AI 回覆 ===
-    const reply = await handleMessage(trimmed, chatHistory, userContext, milestone);
+    // === AI 回覆（用合併後的完整文字）===
+    const reply = await handleMessage(combinedText, chatHistory, userContext, milestone);
 
-    // === 儲存對話 ===
-    await addChatMessage(userId, 'user', trimmed);
+    // === 儲存對話（存合併後的完整文字）===
+    await addChatMessage(userId, 'user', combinedText);
     await addChatMessage(userId, 'assistant', reply);
 
     // === 送出回覆 ===
-    const result = await sendMessage(replyToken, userId, reply);
+    const result = await sendMessage(lastReplyToken, userId, reply);
     console.log(`[MSG] Reply sent via ${result.method} (${reply.length} chars)`);
 
     // === 背景：標籤抽取 & 趨勢更新 ===
-    backgroundTagProcessing(userId, trimmed, reply).catch(err =>
+    backgroundTagProcessing(userId, combinedText, reply).catch(err =>
       console.error('[Tags] Background error:', err)
     );
 
   } catch (err) {
     console.error('[MSG] AI error:', err);
-    await sendMessage(replyToken, userId,
+    await sendMessage(lastReplyToken, userId,
       '抱歉，我剛才腦袋打結了。可以再跟我說一次嗎？'
     );
   }
