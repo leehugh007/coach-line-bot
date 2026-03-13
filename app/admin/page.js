@@ -34,10 +34,13 @@ export default function AdminPage() {
   // 學員紀錄（Supabase）
   const [historyUsers, setHistoryUsers] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [historySearch, setHistorySearch] = useState('');
   const [selectedUser, setSelectedUser] = useState(null);
+  const [selectedUserInfo, setSelectedUserInfo] = useState(null);
   const [userConversations, setUserConversations] = useState([]);
   const [userTags, setUserTags] = useState([]);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [showAllMessages, setShowAllMessages] = useState(false);
 
   // 自動從 localStorage 恢復登入
   useEffect(() => {
@@ -173,20 +176,30 @@ export default function AdminPage() {
   async function loadUserDetail(userId) {
     setDetailLoading(true);
     setSelectedUser(userId);
+    setSelectedUserInfo(historyUsers.find(u => u.id === userId) || null);
     setUserConversations([]);
     setUserTags([]);
+    setShowAllMessages(false);
     try {
       const res = await fetch(`/api/admin/history?user=${userId}`, { headers: { 'x-admin-key': adminKey } });
       const data = await res.json();
       if (res.ok && data.ok) {
         setUserConversations(data.conversations || []);
         setUserTags(data.tags || []);
+        if (data.user) setSelectedUserInfo(data.user);
       }
     } catch (err) {
       console.error('Load detail error:', err);
     }
     setDetailLoading(false);
   }
+
+  const filteredHistoryUsers = historySearch
+    ? historyUsers.filter(u =>
+        (u.display_name || '').toLowerCase().includes(historySearch.toLowerCase()) ||
+        (u.goal || '').toLowerCase().includes(historySearch.toLowerCase())
+      )
+    : historyUsers;
 
   // === 匯入功能 ===
 
@@ -455,26 +468,38 @@ export default function AdminPage() {
             從 Supabase 永久資料庫查看所有學員的完整對話紀錄，不受 Redis 24 小時限制。
           </p>
 
-          {/* 學員列表 */}
+          {/* 搜尋框 + 學員列表 */}
           {historyUsers.length > 0 && !selectedUser && (
-            <div style={{ maxHeight: 400, overflowY: 'auto' }}>
-              {historyUsers.map((u) => (
-                <div
-                  key={u.id}
-                  onClick={() => loadUserDetail(u.id)}
-                  style={{ padding: '12px 14px', borderBottom: '1px solid #eee', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
-                >
-                  <div>
-                    <span style={{ fontWeight: 600, fontSize: 15 }}>{u.display_name || u.id?.substring(0, 12) + '...'}</span>
-                    {u.goal && <span style={{ fontSize: 12, color: '#888', marginLeft: 8 }}>{u.goal.substring(0, 30)}</span>}
+            <>
+              <input
+                type="text"
+                value={historySearch}
+                onChange={(e) => setHistorySearch(e.target.value)}
+                placeholder="搜尋學員名字或目標..."
+                style={{ width: '100%', padding: '10px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box', marginBottom: 10 }}
+              />
+              <div style={{ fontSize: 12, color: '#aaa', marginBottom: 8 }}>
+                共 {filteredHistoryUsers.length} 位學員{historySearch ? `（搜尋：${historySearch}）` : ''}
+              </div>
+              <div style={{ maxHeight: 400, overflowY: 'auto' }}>
+                {filteredHistoryUsers.map((u) => (
+                  <div
+                    key={u.id}
+                    onClick={() => loadUserDetail(u.id)}
+                    style={{ padding: '12px 14px', borderBottom: '1px solid #eee', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                  >
+                    <div>
+                      <span style={{ fontWeight: 600, fontSize: 15 }}>{u.display_name || u.id?.substring(0, 12) + '...'}</span>
+                      {u.goal && <span style={{ fontSize: 12, color: '#888', marginLeft: 8 }}>{u.goal.substring(0, 30)}</span>}
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                      <span style={{ fontSize: 12, color: '#7B1FA2', fontWeight: 600 }}>{u.conversation_count} 則</span>
+                      <span style={{ fontSize: 12, color: '#aaa' }}>{u.updated_at ? timeAgo(u.updated_at) : ''}</span>
+                    </div>
                   </div>
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <span style={{ fontSize: 12, color: '#7B1FA2', fontWeight: 600 }}>{u.conversation_count} 則對話</span>
-                    <span style={{ fontSize: 12, color: '#aaa' }}>{u.updated_at ? timeAgo(u.updated_at) : ''}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            </>
           )}
 
           {historyUsers.length === 0 && !historyLoading && (
@@ -487,11 +512,23 @@ export default function AdminPage() {
           {selectedUser && (
             <div>
               <button
-                onClick={() => { setSelectedUser(null); setUserConversations([]); setUserTags([]); }}
+                onClick={() => { setSelectedUser(null); setSelectedUserInfo(null); setUserConversations([]); setUserTags([]); }}
                 style={{ padding: '6px 14px', border: '1px solid #ccc', borderRadius: 8, fontSize: 13, cursor: 'pointer', background: 'white', color: '#666', marginBottom: 12 }}
               >
                 ← 返回列表
               </button>
+
+              {/* 學員摘要卡片 */}
+              {selectedUserInfo && (
+                <div style={{ background: '#F3E5F5', padding: '12px 16px', borderRadius: 10, marginBottom: 14, fontSize: 14 }}>
+                  <span style={{ fontWeight: 700 }}>{selectedUserInfo.display_name || '未知'}</span>
+                  {selectedUserInfo.goal && <span style={{ marginLeft: 10, color: '#555' }}>{selectedUserInfo.goal}</span>}
+                  <div style={{ fontSize: 12, color: '#888', marginTop: 4 }}>
+                    共 {userConversations.length} 則對話 · {userTags.length} 筆標籤
+                    {selectedUserInfo.join_date && ` · 加入 ${new Date(selectedUserInfo.join_date).toLocaleDateString('zh-TW')}`}
+                  </div>
+                </div>
+              )}
 
               {detailLoading ? (
                 <div style={{ textAlign: 'center', padding: '20px 0', color: '#aaa' }}>載入中...</div>
@@ -514,28 +551,47 @@ export default function AdminPage() {
                     </div>
                   )}
 
-                  {/* 對話紀錄 */}
-                  <div style={{ maxHeight: 500, overflowY: 'auto' }}>
-                    {userConversations.map((msg, i) => (
-                      <div key={i} style={{
-                        padding: '8px 14px', marginBottom: 6, borderRadius: 10, fontSize: 14, lineHeight: 1.6, whiteSpace: 'pre-wrap',
-                        maxWidth: '85%',
-                        ...(msg.role === 'user'
-                          ? { background: '#E3F2FD', marginLeft: 'auto', borderBottomRightRadius: 2 }
-                          : { background: '#F5F5F5', marginRight: 'auto', borderBottomLeftRadius: 2 }),
-                      }}>
-                        <div style={{ fontSize: 11, color: '#aaa', marginBottom: 2 }}>
-                          {msg.role === 'user' ? '學員' : 'AI'} — {new Date(msg.created_at).toLocaleString('zh-TW')}
-                        </div>
-                        {msg.content}
+                  {/* 對話紀錄（預設顯示最近 20 則） */}
+                  {(() => {
+                    const PREVIEW_COUNT = 20;
+                    const total = userConversations.length;
+                    const displayMessages = showAllMessages
+                      ? userConversations
+                      : userConversations.slice(-PREVIEW_COUNT);
+                    const hiddenCount = total - displayMessages.length;
+
+                    return (
+                      <div style={{ maxHeight: 500, overflowY: 'auto' }}>
+                        {hiddenCount > 0 && (
+                          <button
+                            onClick={() => setShowAllMessages(true)}
+                            style={{ width: '100%', padding: '10px', border: '1px dashed #ccc', borderRadius: 8, fontSize: 13, cursor: 'pointer', background: 'white', color: '#7B1FA2', marginBottom: 10, fontWeight: 600 }}
+                          >
+                            載入更早的 {hiddenCount} 則對話
+                          </button>
+                        )}
+                        {displayMessages.map((msg, i) => (
+                          <div key={i} style={{
+                            padding: '8px 14px', marginBottom: 6, borderRadius: 10, fontSize: 14, lineHeight: 1.6, whiteSpace: 'pre-wrap',
+                            maxWidth: '85%',
+                            ...(msg.role === 'user'
+                              ? { background: '#E3F2FD', marginLeft: 'auto', borderBottomRightRadius: 2 }
+                              : { background: '#F5F5F5', marginRight: 'auto', borderBottomLeftRadius: 2 }),
+                          }}>
+                            <div style={{ fontSize: 11, color: '#aaa', marginBottom: 2 }}>
+                              {msg.role === 'user' ? '學員' : 'AI'} — {new Date(msg.created_at).toLocaleString('zh-TW')}
+                            </div>
+                            {msg.content}
+                          </div>
+                        ))}
+                        {total === 0 && (
+                          <div style={{ textAlign: 'center', padding: '20px 0', color: '#aaa', fontSize: 14 }}>
+                            尚無對話紀錄
+                          </div>
+                        )}
                       </div>
-                    ))}
-                    {userConversations.length === 0 && (
-                      <div style={{ textAlign: 'center', padding: '20px 0', color: '#aaa', fontSize: 14 }}>
-                        尚無對話紀錄
-                      </div>
-                    )}
-                  </div>
+                    );
+                  })()}
                 </>
               )}
             </div>
