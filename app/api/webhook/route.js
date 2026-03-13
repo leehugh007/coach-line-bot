@@ -24,6 +24,7 @@ import {
   extractCoachingTags, saveCoachingTags,
   shouldUpdateTrend, updateCoachingSummary,
   getCoachingSummary, checkMilestones, getTopicCount,
+  shouldUpdateJourney, updateJourneySummary, getJourneySummary,
 } from '@/lib/tags';
 import { NextResponse } from 'next/server';
 
@@ -270,6 +271,7 @@ async function bufferAndSchedule(replyToken, userId, text) {
         `coach:${userId}:topics`,
         `coach:${userId}:milestones`,
         `coach:${userId}:summary`,
+        `coach:${userId}:journey`,
       ];
       await Promise.all(keys.map(k => r.del(k)));
 
@@ -355,11 +357,12 @@ async function processBatchedMessages(userId, messages) {
   const lastReplyToken = messages[messages.length - 1].replyToken;
 
   try {
-    // === 並行載入：對話歷史 + 用戶資料 + 心態摘要 ===
-    const [rawHistory, user, coachingSummary] = await Promise.all([
+    // === 並行載入：對話歷史 + 用戶資料 + 心態摘要 + 旅程摘要 ===
+    const [rawHistory, user, coachingSummary, journeySummary] = await Promise.all([
       getChatHistory(userId),
       getUser(userId),
       getCoachingSummary(userId),
+      getJourneySummary(userId),
     ]);
 
     const chatHistory = formatChatForGemini(rawHistory);
@@ -403,7 +406,7 @@ async function processBatchedMessages(userId, messages) {
     const contextUser = matchedPreload
       ? await getUser(userId)
       : (isIntro ? updatedUser : (user || updatedUser));
-    const userContext = buildUserContext(contextUser, coachingSummary);
+    const userContext = buildUserContext(contextUser, coachingSummary, journeySummary);
 
     console.log(`[MSG] ${userId?.substring(0, 8)}: "${combinedText.substring(0, 60)}", msgs: ${messages.length}, history: ${chatHistory.length}, intro: ${isIntro}, context: ${userContext.length}c`);
 
@@ -445,6 +448,11 @@ async function backgroundTagProcessing(userId, userText, aiReply) {
     if (await shouldUpdateTrend(userId)) {
       console.log(`[Tags] Triggering trend update at ${totalTopics} topics`);
       await updateCoachingSummary(userId);
+    }
+
+    if (await shouldUpdateJourney(userId)) {
+      console.log(`[Tags] Triggering journey update at ${totalTopics} topics`);
+      await updateJourneySummary(userId);
     }
   } catch (err) {
     console.error('[Tags] Background processing error:', err);
