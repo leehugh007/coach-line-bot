@@ -259,6 +259,40 @@ async function bufferAndSchedule(replyToken, userId, text) {
   if (['我的id', '我的ID', 'myid', 'my id'].includes(lower)) {
     return await sendMessage(replyToken, userId, `你的 userId：\n${userId}`);
   }
+  // /reset — 教練專用：清除自己的 Redis + Supabase 資料
+  if (trimmed === '/reset' && userId === process.env.COACH_USER_ID) {
+    try {
+      const { Redis } = await import('@upstash/redis');
+      const r = new Redis({ url: process.env.KV_REST_API_URL, token: process.env.KV_REST_API_TOKEN });
+      const keys = [
+        `coach-user:${userId}`,
+        `coach-chat:${userId}`,
+        `coach:${userId}:topics`,
+        `coach:${userId}:milestones`,
+        `coach:${userId}:summary`,
+      ];
+      await Promise.all(keys.map(k => r.del(k)));
+
+      // 也清 Supabase
+      const { getSupabase } = await import('@/lib/supabase');
+      const sb = getSupabase();
+      if (sb) {
+        await Promise.all([
+          sb.from('conversations').delete().eq('user_id', userId),
+          sb.from('coaching_tags').delete().eq('user_id', userId),
+          sb.from('milestones').delete().eq('user_id', userId),
+          sb.from('users').delete().eq('id', userId),
+        ]);
+      }
+
+      console.log(`[Reset] Cleared all data for ${userId?.substring(0, 8)}`);
+      return await sendMessage(replyToken, userId, '已清除你的所有資料（Redis + Supabase）。你現在是全新的狀態，可以重新自我介紹。');
+    } catch (err) {
+      console.error('[Reset] Error:', err);
+      return await sendMessage(replyToken, userId, `清除失敗：${err.message}`);
+    }
+  }
+
   if (['怎麼用', '使用說明', '功能', '你能做什麼'].includes(trimmed)) {
     return await sendMessage(replyToken, userId,
       `我可以陪你聊的話題：
