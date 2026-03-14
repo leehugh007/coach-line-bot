@@ -13,6 +13,7 @@
 import { verifySignature, sendMessage, getProfile, getGroupMemberProfile, getGroupSummary } from '@/lib/line';
 import { handleMessage, basicMessageFilter, aiDetectQuestion, generateDraftResponse } from '@/lib/ai';
 import { getChatHistory, addChatMessage, formatChatForGemini, addGroupMessage, getGroupContext } from '@/lib/chat';
+import { classifyIntent } from '@/lib/knowledge';
 import { savePendingItem } from '@/lib/pending';
 import { bufferMessage, isBufferReady, consumeBuffer, BATCH_DELAY, TEXT_EXTRA_DELAY } from '@/lib/queue';
 import {
@@ -402,16 +403,25 @@ async function processBatchedMessages(userId, messages) {
       milestone = await checkMilestones(userId, totalTopics);
     }
 
-    // === 組合 userContext ===
+    // === AI 意圖分類（提前呼叫，結果同時用於知識路由 + 用戶切片選取）===
+    const recentUserMsgs = chatHistory
+      .filter(msg => msg.role === 'user')
+      .map(msg => msg.parts?.[0]?.text || '')
+      .slice(-2)
+      .join('；');
+    const intent = await classifyIntent(combinedText, recentUserMsgs);
+    const profileSlices = intent?.slices || null;
+
+    // === 組合 userContext（用 AI 選取的切片動態注入）===
     const contextUser = matchedPreload
       ? await getUser(userId)
       : (isIntro ? updatedUser : (user || updatedUser));
-    const userContext = buildUserContext(contextUser, coachingSummary, journeySummary);
+    const userContext = buildUserContext(contextUser, coachingSummary, journeySummary, profileSlices);
 
-    console.log(`[MSG] ${userId?.substring(0, 8)}: "${combinedText.substring(0, 60)}", msgs: ${messages.length}, history: ${chatHistory.length}, intro: ${isIntro}, context: ${userContext.length}c`);
+    console.log(`[MSG] ${userId?.substring(0, 8)}: "${combinedText.substring(0, 60)}", msgs: ${messages.length}, history: ${chatHistory.length}, intro: ${isIntro}, slices: ${profileSlices?.join(',') || 'all'}, context: ${userContext.length}c`);
 
-    // === AI 回覆（用合併後的完整文字）===
-    const reply = await handleMessage(combinedText, chatHistory, userContext, milestone);
+    // === AI 回覆（用合併後的完整文字，傳入預計算的意圖）===
+    const reply = await handleMessage(combinedText, chatHistory, userContext, milestone, intent);
 
     // === 儲存對話（存合併後的完整文字）===
     await addChatMessage(userId, 'user', combinedText);
