@@ -47,6 +47,42 @@ export async function POST(request) {
     return NextResponse.json({ ok: true });
   }
 
+  // Telegram 快速通知：在主流程（HTTP response 前）掃描群組訊息關鍵字
+  // 群組 AI 偵測仍在 waitUntil 背景做，但通知先用關鍵字發，確保送達
+  const tgToken = process.env.TELEGRAM_BOT_TOKEN;
+  const tgChat = process.env.TELEGRAM_CHAT_ID;
+  if (tgToken && tgChat) {
+    const mindsetWords = ['放棄','不想','算了','崩潰','撐不下去','做不到','好累','沒用','沒效','受不了','暴食','好想吃','管不住','復胖','不敢量','不想量'];
+    for (const event of events) {
+      if (event.type === 'message' && event.message?.type === 'text' && event.source?.type === 'group') {
+        const text = event.message.text || '';
+        const matched = mindsetWords.find(w => text.includes(w));
+        if (matched) {
+          try {
+            let name = '學員';
+            try {
+              const profile = await getProfile(event.source.userId);
+              if (profile?.displayName) name = profile.displayName;
+            } catch (_) {}
+            let groupName = '';
+            try {
+              const gs = await getGroupSummary(event.source.groupId);
+              if (gs?.groupName) groupName = `【${gs.groupName}】`;
+            } catch (_) {}
+            await fetch(`https://api.telegram.org/bot${tgToken}/sendMessage`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                chat_id: tgChat,
+                text: `🔴${groupName} ${name} 可能需要關注\n\n「${text.substring(0, 200)}」\n\n→ 查看後台：https://coach-line-bot.vercel.app/admin`,
+              }),
+            });
+          } catch (_) {}
+        }
+      }
+    }
+  }
+
   const processPromises = events.map(event => processEvent(event));
 
   if (globalThis.__nextWaitUntil) {
