@@ -188,18 +188,38 @@ async function handleGroupMessage(source, userId, text) {
       draft,
     });
 
-    // 推播通知教練（如果有設定）
-    const coachId = process.env.COACH_USER_ID;
-    if (coachId) {
-      const topicMap = { mindset: '心態', diet: '飲食', plateau: '體重停滯', emotion: '情緒', other: '問題' };
-      const confidenceLabel = confidence >= 0.8 ? '🔴' : confidence >= 0.6 ? '🟡' : '⚪';
-      const groupLabel = groupName ? `【${groupName}】` : '';
-      const notifyText = `${confidenceLabel}${groupLabel} ${displayName} 提了${topicMap[topic] || ''}問題（信心 ${Math.round(confidence * 100)}%），草稿已備好。\n到後台查看：https://coach-line-bot.vercel.app/admin`;
+    // 推播通知教練（Telegram 優先，LINE Push 備援）
+    const topicMap = { mindset: '心態', diet: '飲食', plateau: '體重停滯', emotion: '情緒', other: '問題' };
+    const confidenceLabel = confidence >= 0.8 ? '🔴' : confidence >= 0.6 ? '🟡' : '⚪';
+    const groupLabel = groupName ? `【${groupName}】` : '';
+    const notifyText = `${confidenceLabel}${groupLabel} ${displayName} 提了${topicMap[topic] || ''}問題（信心 ${Math.round(confidence * 100)}%），草稿已備好。`;
+
+    // Telegram 通知（免費無上限）
+    const tgToken = process.env.TELEGRAM_BOT_TOKEN;
+    const tgChat = process.env.TELEGRAM_CHAT_ID;
+    if (tgToken && tgChat) {
       try {
-        const { pushMessage } = await import('@/lib/line');
-        await pushMessage(coachId, notifyText);
+        await fetch(`https://api.telegram.org/bot${tgToken}/sendMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: tgChat,
+            text: `${notifyText}\n\n學員說：\n「${trimmed?.substring(0, 200)}」\n\n→ 查看後台：https://coach-line-bot.vercel.app/admin`,
+          }),
+        });
       } catch (e) {
-        console.error('[Group-Q] Push notify error:', e);
+        console.error('[Group-Q] Telegram notify error:', e);
+      }
+    } else {
+      // Telegram 沒設定時 fallback 到 LINE Push
+      const coachId = process.env.COACH_USER_ID;
+      if (coachId) {
+        try {
+          const { pushMessage } = await import('@/lib/line');
+          await pushMessage(coachId, `${notifyText}\n到後台查看：https://coach-line-bot.vercel.app/admin`);
+        } catch (e) {
+          console.error('[Group-Q] LINE Push notify error:', e);
+        }
       }
     }
 
