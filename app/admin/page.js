@@ -31,6 +31,14 @@ export default function AdminPage() {
   const [manualLoading, setManualLoading] = useState(false);
   const [manualError, setManualError] = useState('');
 
+  // 主動關心
+  const [outreachUsers, setOutreachUsers] = useState([]);
+  const [outreachLoading, setOutreachLoading] = useState(false);
+  const [outreachSelected, setOutreachSelected] = useState(new Set());
+  const [outreachMessage, setOutreachMessage] = useState('{name}，我最近常被同學問到一個問題：「外食的時候到底怎麼選比較好？」其實沒有想像中那麼難，掌握幾個小訣竅就能搭配得不錯。\n\n不知道{name}有沒有剛好也遇到類似的問題？如果有的話，我整理了幾個重點可以跟你分享，你想聽聽看嗎？😊');
+  const [outreachSending, setOutreachSending] = useState(false);
+  const [outreachResult, setOutreachResult] = useState(null);
+
   // 學員紀錄（Supabase）
   const [historyUsers, setHistoryUsers] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -157,6 +165,72 @@ export default function AdminPage() {
       setCopiedId(id);
       setTimeout(() => setCopiedId(''), 2000);
     }
+  }
+
+  // === 主動關心功能 ===
+
+  async function loadOutreachUsers() {
+    setOutreachLoading(true);
+    try {
+      const res = await fetch('/api/admin/history', { headers: { 'x-admin-key': adminKey } });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        setOutreachUsers(data.users || []);
+        setOutreachSelected(new Set());
+        setOutreachResult(null);
+      }
+    } catch (err) {
+      console.error('Load outreach users error:', err);
+    }
+    setOutreachLoading(false);
+  }
+
+  function toggleOutreach(userId) {
+    setOutreachSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(userId)) next.delete(userId);
+      else next.add(userId);
+      return next;
+    });
+  }
+
+  function toggleAllOutreach() {
+    if (outreachSelected.size === outreachUsers.length) {
+      setOutreachSelected(new Set());
+    } else {
+      setOutreachSelected(new Set(outreachUsers.map(u => u.id)));
+    }
+  }
+
+  async function sendOutreach() {
+    if (outreachSelected.size === 0) return;
+    // 預覽第一位學員的訊息
+    const firstUser = outreachUsers.find(u => outreachSelected.has(u.id));
+    const previewMsg = outreachMessage.replace(/\{name\}/g, firstUser?.display_name || '同學');
+    if (!confirm(`確定要發送給 ${outreachSelected.size} 位學員？\n\n預覽（${firstUser?.display_name || '?'}）：\n${previewMsg}`)) return;
+    setOutreachSending(true);
+    setOutreachResult(null);
+    try {
+      // 組合 users 陣列（含 id + name）
+      const selectedUsers = outreachUsers
+        .filter(u => outreachSelected.has(u.id))
+        .map(u => ({ id: u.id, name: u.display_name || null }));
+      const res = await fetch('/api/admin/outreach', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-admin-key': adminKey },
+        body: JSON.stringify({ users: selectedUsers, message: outreachMessage }),
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        setOutreachResult({ type: 'success', sent: data.sent, failed: data.failed });
+        setOutreachSelected(new Set());
+      } else {
+        setOutreachResult({ type: 'error', msg: data.error || '發送失敗' });
+      }
+    } catch (err) {
+      setOutreachResult({ type: 'error', msg: '連線失敗：' + err.message });
+    }
+    setOutreachSending(false);
   }
 
   // === 學員紀錄功能（Supabase） ===
@@ -449,6 +523,117 @@ export default function AdminPage() {
               </div>
             </div>
           ))}
+        </div>
+
+        {/* ===== 主動關心 ===== */}
+        <div style={{ background: 'white', borderRadius: 12, padding: 24, marginBottom: 20, boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+            <h2 style={{ fontSize: 18, paddingBottom: 8, borderBottom: '2px solid #FF5722', display: 'inline-block', margin: 0 }}>主動關心</h2>
+            <button
+              onClick={loadOutreachUsers}
+              disabled={outreachLoading}
+              style={{ padding: '8px 16px', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer', background: '#FF5722', color: 'white' }}
+            >
+              {outreachLoading ? '載入中...' : outreachUsers.length ? '重新載入' : '載入學員'}
+            </button>
+          </div>
+
+          <p style={{ fontSize: 14, color: '#666', marginBottom: 16 }}>
+            勾選需要關心的學員，一鍵發送私訊。適合每週檢視沒上傳飲食的同學。
+          </p>
+
+          {/* 訊息模板 */}
+          {outreachUsers.length > 0 && (
+            <>
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 13, color: '#888', marginBottom: 6 }}>關心訊息（可編輯，<span style={{ color: '#FF5722' }}>{'{name}'}</span> 會自動替換成學員名字）：</div>
+                <textarea
+                  value={outreachMessage}
+                  onChange={(e) => setOutreachMessage(e.target.value)}
+                  rows={4}
+                  style={{ width: '100%', padding: '10px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box', resize: 'vertical', lineHeight: 1.6 }}
+                />
+              </div>
+
+              {/* 全選 + 計數 */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 14 }}>
+                  <input
+                    type="checkbox"
+                    checked={outreachSelected.size === outreachUsers.length && outreachUsers.length > 0}
+                    onChange={toggleAllOutreach}
+                    style={{ width: 16, height: 16 }}
+                  />
+                  全選
+                </label>
+                <span style={{ fontSize: 13, color: outreachSelected.size > 0 ? '#FF5722' : '#aaa', fontWeight: outreachSelected.size > 0 ? 600 : 400 }}>
+                  已選 {outreachSelected.size} 人
+                </span>
+              </div>
+
+              {/* 學員列表 + 勾選 */}
+              <div style={{ maxHeight: 350, overflowY: 'auto', border: '1px solid #eee', borderRadius: 8 }}>
+                {outreachUsers.map((u) => (
+                  <label
+                    key={u.id}
+                    style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderBottom: '1px solid #f5f5f5', cursor: 'pointer' }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={outreachSelected.has(u.id)}
+                      onChange={() => toggleOutreach(u.id)}
+                      style={{ width: 16, height: 16, flexShrink: 0 }}
+                    />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ fontWeight: 600, fontSize: 14 }}>{u.display_name || u.id?.substring(0, 12) + '...'}</span>
+                      {u.goal && <span style={{ fontSize: 12, color: '#888', marginLeft: 8 }}>{u.goal.substring(0, 25)}</span>}
+                    </div>
+                    <div style={{ fontSize: 12, color: '#aaa', flexShrink: 0 }}>
+                      {u.conversation_count || 0} 則對話
+                      {u.updated_at && ` · ${timeAgo(u.updated_at)}`}
+                    </div>
+                  </label>
+                ))}
+              </div>
+
+              {/* 發送按鈕 */}
+              <div style={{ marginTop: 16, display: 'flex', gap: 10, alignItems: 'center' }}>
+                <button
+                  onClick={sendOutreach}
+                  disabled={outreachSending || outreachSelected.size === 0}
+                  style={{
+                    padding: '12px 28px', border: 'none', borderRadius: 8, fontSize: 15, fontWeight: 600,
+                    cursor: outreachSelected.size > 0 ? 'pointer' : 'not-allowed',
+                    background: outreachSelected.size > 0 ? '#FF5722' : '#ccc', color: 'white',
+                  }}
+                >
+                  {outreachSending ? '發送中...' : `發送給 ${outreachSelected.size} 位學員`}
+                </button>
+                <span style={{ fontSize: 12, color: '#aaa' }}>使用 LINE Push（注意每月 200 則額度）</span>
+              </div>
+            </>
+          )}
+
+          {outreachUsers.length === 0 && !outreachLoading && (
+            <div style={{ textAlign: 'center', padding: '20px 0', color: '#aaa', fontSize: 14 }}>
+              點擊「載入學員」查看可關心的學員
+            </div>
+          )}
+
+          {/* 發送結果 */}
+          {outreachResult && (
+            <div style={{
+              marginTop: 16, padding: 14, borderRadius: 8, fontSize: 14,
+              background: outreachResult.type === 'success' ? colors.success.bg : colors.error.bg,
+              color: outreachResult.type === 'success' ? colors.success.text : colors.error.text,
+              border: '1px solid ' + (outreachResult.type === 'success' ? colors.success.border : colors.error.border),
+            }}>
+              {outreachResult.type === 'success'
+                ? `已發送 ${outreachResult.sent} 則${outreachResult.failed > 0 ? `，${outreachResult.failed} 則失敗` : ''}`
+                : outreachResult.msg
+              }
+            </div>
+          )}
         </div>
 
         {/* ===== 學員對話紀錄（Supabase）===== */}
