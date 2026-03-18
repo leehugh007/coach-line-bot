@@ -427,7 +427,12 @@ export default function AdminPage() {
   return (
     <div style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif', background: '#f5f5f5', minHeight: '100vh', padding: '20px' }}>
       <div style={{ maxWidth: 700, margin: '0 auto' }}>
-        <h1 style={{ textAlign: 'center', marginBottom: 8, fontSize: 24 }}>休校長小幫手 管理後台</h1>
+        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 16, marginBottom: 8 }}>
+          <h1 style={{ fontSize: 24, margin: 0 }}>休校長小幫手 管理後台</h1>
+          <a href="/admin/students" style={{ padding: '6px 14px', border: '2px solid #7B1FA2', borderRadius: 8, fontSize: 13, fontWeight: 600, color: '#7B1FA2', textDecoration: 'none', background: 'white' }}>
+            👥 學員管理
+          </a>
+        </div>
         <p style={{ textAlign: 'center', color: '#888', marginBottom: 30, fontSize: 14 }}>群組問題監控 & 學員資料管理</p>
 
         {/* ===== 群組問題監控 ===== */}
