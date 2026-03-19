@@ -397,54 +397,89 @@ const HUNGER_TYPES = [
   { type: '習慣吃多的餓', solution: '先喝水等10分鐘，用替代不用忍', emoji: '🧠' },
 ];
 
-// ===== 經期飲食 =====
+// ===== 經期飲食（來自休校長「女性月經週期×ABC代謝重建」完整課程）=====
 const PERIOD_GUIDE = [
   {
-    id: 'pre',
-    phase: '經前嘴饞',
-    emoji: '😋',
-    desc: '荷爾蒙變化讓身體渴望碳水和甜食，不是你意志力不夠',
+    id: 'period',
+    phase: '月經期（Day 1-5）',
+    emoji: '🔄',
+    subtitle: '重置期',
+    desc: '荷爾蒙回到基線，身體在重新開始',
+    metabolic: '胰島素敏感度開始回升，黃體期滯留的水分開始排出 → 體重會自然掉下來',
     items: [
-      { food: '高純度巧克力（70%+）', note: '拇指指節大小=一份，解嘴饞' },
-      { food: '黑豆水', note: '補蛋白質+去水腫' },
-      { food: '香蕉牛奶/芝麻豆漿', note: '色胺酸+鈣質，舒緩不適' },
-      { food: '無糖希臘優格+莓果', note: '想吃冰的替代方案' },
-    ],
-  },
-  {
-    id: 'during',
-    phase: '經期中',
-    emoji: '🩸',
-    desc: '身體在休息和修復，配合它而不是對抗它',
-    items: [
-      { food: '紅肉（牛肉、豬肝）', note: '補鐵，經期流失需要補回來' },
+      { food: '紅肉（牛肉、豬肝）', note: '鐵質隨經血流失，需要補回來' },
       { food: '深綠色蔬菜', note: '也是鐵的好來源' },
-      { food: '薑茶', note: '暖子宮、舒緩不適' },
-      { food: '藍莓', note: '花青素抗氧化' },
+      { food: '薑茶', note: '暖子宮、舒緩經痛' },
+      { food: '正常ABC飲食', note: '不用特別改變，不餓就不用硬吃' },
     ],
-    tips: ['生冷食物暫停（生菜沙拉改溫沙拉或炒蔬菜）', '不舒服就休息，不要勉強運動', '可以做輕度運動（散步、伸展）'],
+    tips: ['不舒服就休息，舒服就可以做輕度運動（走路、伸展）', '上個月黃體期漲的體重，這幾天會開始退', '生冷食物暫停，生菜沙拉改溫沙拉或炒蔬菜'],
   },
   {
-    id: 'weight',
-    phase: '經期體重',
-    emoji: '⚖️',
-    desc: '上升1-2公斤是水腫不是胖',
+    id: 'follicular',
+    phase: '濾泡期（Day 6-13）',
+    emoji: '🌟',
+    subtitle: '代謝順風期 — 整個月最友善的階段',
+    desc: '雌激素穩定上升，胰島素敏感度最好，身體偏好燒脂肪',
+    metabolic: '肌肉搶碳水的能力最強、食慾穩定不容易暴食、力量和恢復都比較好',
     items: [
-      { food: '多喝水', note: '幫助排水（聽起來矛盾但有效）' },
-      { food: '減少鈉攝取', note: '少吃太鹹的' },
+      { food: '正常ABC飲食', note: '身體自己會跑得很順' },
+      { food: '可以嘗試挑戰性訓練', note: '力量訓練在這個階段最適合' },
     ],
-    tips: ['經期結束後體重會自然消下去', '不要因為經期體重上升就沮喪或節食', '這是身體正常的生理反應'],
+    tips: ['這個階段你會覺得ABC超簡單、身體超配合', '代謝重建效果最明顯：體重下降、體脂變化', '不用刻意多吃少吃，正常走就好'],
   },
   {
-    id: 'after',
-    phase: '經後恢復',
-    emoji: '✨',
-    desc: '身體回到正軌，可能是減脂的好時機',
+    id: 'ovulation',
+    phase: '排卵期（Day 14 前後）',
+    emoji: '⚡',
+    subtitle: '運動表現高峰',
+    desc: '雌激素最高峰+睪固酮小高峰，力量和運動表現最佳',
+    metabolic: '代謝狀態還是很好，但排卵後就是轉折點',
     items: [
-      { food: '正常ABC飲食', note: '回到菜肉飯順序' },
-      { food: '補充蛋白質', note: '修復期需要更多蛋白質' },
+      { food: '正常ABC飲食', note: '跟濾泡期一樣，代謝狀態好' },
+      { food: '力量訓練可以好好發揮', note: '這幾天是整個月表現最好的' },
     ],
-    tips: ['經後是很多人突然掉秤的時候', '持續做對的事，身體會給你回報'],
+    tips: ['有些人排卵時會輕微下腹痛，這是正常的'],
+  },
+  {
+    id: 'luteal',
+    phase: '黃體期（Day 15-28）',
+    emoji: '🌊',
+    subtitle: '代謝逆風期 — 最需要理解的階段',
+    desc: '黃體素大量分泌，胰島素敏感度下降，想吃甜食是大腦化學在改變不是意志力差',
+    metabolic: '基礎代謝率升高100-300大卡（你真的比較餓）、水分滯留1-3公斤（是水不是胖）、身體偏好燒糖不燒脂肪',
+    items: [
+      { food: '增加色胺酸食物', note: '雞肉、魚、堅果、香蕉 — 色胺酸是血清素原料' },
+      { food: '增加鎂的攝取', note: '深綠色蔬菜、堅果、85%黑巧克力 — 鎂參與血清素合成' },
+      { food: '多吃蛋白質和好油脂', note: '比碳水更能穩住食慾' },
+      { food: '黑豆水', note: '補蛋白質+去水腫' },
+      { food: '不要少吃！', note: '基礎代謝率升高，少吃→血糖更不穩→更想吃甜食→惡性循環' },
+    ],
+    tips: [
+      '體重上升1-3公斤是水，月經來就會排掉',
+      '多吃200-300大卡是正常的，大部分被升高的代謝率消耗了',
+      '想吃甜食是血清素下降，不是意志力差',
+      '不要跟渴望硬拼，用增加營養素的方式穩住大腦化學',
+      '覺得特別累就降低運動強度，不是偷懶是尊重身體',
+    ],
+  },
+];
+
+const PERIOD_MYTHS = [
+  {
+    myth: '經前暴食就是破戒',
+    truth: '基礎代謝率升高+血清素下降，身體本來就需要更多能量。多吃的200-300大卡大部分被代謝消耗了。真正的問題是愧疚感引發的惡性循環。',
+  },
+  {
+    myth: '經前體重上升代表變胖了',
+    truth: '1-3公斤幾乎100%是水。用月趨勢看（每次月經結束後第7天量，跟上個月同天比），不要用日體重判斷。',
+  },
+  {
+    myth: '月經期不能運動',
+    truth: '這時胰島素敏感度在回升，輕度到中度運動反而可以緩解經痛（運動釋放腦內啡）。不舒服就休息，舒服就動。',
+  },
+  {
+    myth: '女生應該跟著週期調整飲食計畫',
+    truth: '不需要那麼複雜。ABC代謝重建的核心是代謝靈活性，不是多一套規則。你需要的是「理解後不恐慌」，不是「黃體期少吃碳水」。',
   },
 ];
 
@@ -711,29 +746,59 @@ export default function GuidePage() {
         {/* ===== 經期飲食 ===== */}
         {activeTab === 'period' && (
           <div>
-            <div style={{ textAlign: 'center', fontSize: 14, color: '#888', marginBottom: 16 }}>
-              經期是身體在休息和修復，配合它而不是對抗它
+            <div style={{ textAlign: 'center', padding: '12px 16px', background: '#FCE4EC', borderRadius: 12, marginBottom: 16 }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: '#880E4F' }}>
+                月經週期讓代謝在順風和逆風之間擺盪<br/>這是設計好的，不是你的問題
+              </div>
+              <div style={{ fontSize: 12, color: '#999', marginTop: 6 }}>— 休校長「女性月經週期×ABC代謝重建」課程</div>
             </div>
 
             {PERIOD_GUIDE.map(p => (
-              <div key={p.id} style={{ background: 'white', borderRadius: 12, padding: 16, marginBottom: 10, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
-                <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 2 }}>{p.emoji} {p.phase}</div>
-                <div style={{ fontSize: 13, color: '#888', marginBottom: 12 }}>{p.desc}</div>
+              <div key={p.id} style={{ background: 'white', borderRadius: 12, padding: 16, marginBottom: 12, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
+                <div style={{ fontSize: 17, fontWeight: 700, marginBottom: 2 }}>{p.emoji} {p.phase}</div>
+                {p.subtitle && (
+                  <div style={{ fontSize: 13, fontWeight: 600, color: '#E8734A', marginBottom: 6 }}>{p.subtitle}</div>
+                )}
+                <div style={{ fontSize: 13, color: '#666', marginBottom: 8 }}>{p.desc}</div>
+                {p.metabolic && (
+                  <div style={{ fontSize: 13, color: '#555', padding: '8px 12px', background: '#f5f0eb', borderRadius: 8, marginBottom: 10, lineHeight: 1.6 }}>
+                    ⚡ {p.metabolic}
+                  </div>
+                )}
+                <div style={{ fontSize: 13, fontWeight: 600, color: '#888', marginBottom: 4 }}>建議飲食：</div>
                 {p.items.map((item, i) => (
-                  <div key={i} style={{ padding: '8px 0', borderTop: i === 0 ? '1px solid #f0ece8' : 'none' }}>
-                    <div style={{ fontWeight: 600, fontSize: 14, color: '#2a2520' }}>{item.food}</div>
-                    <div style={{ fontSize: 13, color: '#777' }}>{item.note}</div>
+                  <div key={i} style={{ padding: '6px 0' }}>
+                    <div style={{ fontWeight: 600, fontSize: 14, color: '#2a2520' }}>✅ {item.food}</div>
+                    <div style={{ fontSize: 13, color: '#777', marginLeft: 22 }}>{item.note}</div>
                   </div>
                 ))}
                 {p.tips && (
-                  <div style={{ marginTop: 10, padding: '10px 12px', background: '#FCE4EC', borderRadius: 8 }}>
+                  <div style={{ marginTop: 10, padding: '10px 12px', background: '#FFF8E1', borderRadius: 8 }}>
                     {p.tips.map((tip, i) => (
-                      <div key={i} style={{ fontSize: 13, color: '#880E4F', padding: '2px 0' }}>💡 {tip}</div>
+                      <div key={i} style={{ fontSize: 13, color: '#F57F17', padding: '3px 0' }}>💡 {tip}</div>
                     ))}
                   </div>
                 )}
               </div>
             ))}
+
+            {/* 迷思打破 */}
+            <div style={{ fontSize: 16, fontWeight: 700, color: '#2a2520', margin: '20px 0 12px' }}>常見迷思打破</div>
+            {PERIOD_MYTHS.map((m, i) => (
+              <div key={i} style={{ background: 'white', borderRadius: 12, padding: 16, marginBottom: 10, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: '#BF360C', marginBottom: 6 }}>❌ 迷思：{m.myth}</div>
+                <div style={{ fontSize: 14, color: '#2E7D32', lineHeight: 1.6 }}>✅ {m.truth}</div>
+              </div>
+            ))}
+
+            <div style={{ marginTop: 16, padding: 16, background: '#FCE4EC', borderRadius: 12, textAlign: 'center' }}>
+              <div style={{ fontSize: 14, color: '#880E4F', fontWeight: 600, lineHeight: 1.8 }}>
+                記住三件事：<br/>
+                1. 順風逆風是設計好的，不是你的問題<br/>
+                2. 黃體期體重上升幾乎都是水<br/>
+                3. 代謝重建是讓你在逆風期也不會慌的能力
+              </div>
+            </div>
           </div>
         )}
 
