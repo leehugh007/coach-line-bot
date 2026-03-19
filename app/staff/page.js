@@ -294,12 +294,49 @@ export default function StaffPage() {
               </select>
             </div>
 
-            {/* Excel 上傳 */}
+            {/* 範本下載 + Excel 上傳 */}
+            <div style={{ marginBottom: 16, padding: 16, background: '#E3F2FD', borderRadius: 12 }}>
+              <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>Excel 格式說明</div>
+              <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse', background: 'white', borderRadius: 8, overflow: 'hidden' }}>
+                <thead>
+                  <tr style={{ background: '#f5f5f5' }}>
+                    <th style={{ padding: '8px 10px', textAlign: 'left', borderBottom: '1px solid #eee' }}>LINE名稱 *必填</th>
+                    <th style={{ padding: '8px 10px', textAlign: 'left', borderBottom: '1px solid #eee' }}>真實姓名</th>
+                    <th style={{ padding: '8px 10px', textAlign: 'left', borderBottom: '1px solid #eee' }}>學號</th>
+                    <th style={{ padding: '8px 10px', textAlign: 'left', borderBottom: '1px solid #eee' }}>自我介紹</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr><td style={{ padding: '6px 10px', color: '#666' }}>Elaine Yeh</td><td style={{ padding: '6px 10px', color: '#666' }}>宜萍</td><td style={{ padding: '6px 10px', color: '#666' }}>2603001</td><td style={{ padding: '6px 10px', color: '#666' }}>金融業，第二期學員</td></tr>
+                  <tr><td style={{ padding: '6px 10px', color: '#666' }}>Annie</td><td style={{ padding: '6px 10px', color: '#666' }}>Annie</td><td style={{ padding: '6px 10px', color: '#666' }}>2603002</td><td style={{ padding: '6px 10px', color: '#666' }}>12月班班長</td></tr>
+                </tbody>
+              </table>
+              <div style={{ fontSize: 12, color: '#1565C0', marginTop: 8 }}>
+                * LINE名稱 = 學員在 LINE 上的顯示名稱（用來自動比對）<br/>
+                * 其他欄位選填，欄位名稱只要包含關鍵字就能對到（例如「LINE帳號」「暱稱」都行）
+              </div>
+              <button
+                onClick={() => {
+                  const wb = XLSX.utils.book_new();
+                  const ws = XLSX.utils.aoa_to_sheet([
+                    ['LINE名稱', '真實姓名', '學號', '自我介紹'],
+                    ['（學員的LINE顯示名稱）', '（真實姓名）', '（選填）', '（從群組複製自介，選填）'],
+                  ]);
+                  ws['!cols'] = [{ wch: 20 }, { wch: 12 }, { wch: 12 }, { wch: 40 }];
+                  XLSX.utils.book_append_sheet(wb, ws, '學員名單');
+                  XLSX.writeFile(wb, '學員名單範本.xlsx');
+                }}
+                style={{ marginTop: 10, padding: '6px 16px', borderRadius: 6, border: '1px solid #1565C0', background: 'white', color: '#1565C0', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}
+              >
+                📥 下載 Excel 範本
+              </button>
+            </div>
+
             <div style={{ marginBottom: 16, padding: 20, border: '2px dashed #ddd', borderRadius: 12, textAlign: 'center', background: 'white' }}>
               <div style={{ fontSize: 28, marginBottom: 8 }}>📄</div>
-              <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>上傳 Excel 檔案</div>
+              <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>上傳填好的 Excel</div>
               <div style={{ fontSize: 12, color: '#888', marginBottom: 12 }}>
-                支援 .xlsx / .xls，欄位需包含「LINE 名稱」（必填），「真實姓名」「自介」選填
+                支援 .xlsx / .xls / .csv
               </div>
               <input
                 type="file"
