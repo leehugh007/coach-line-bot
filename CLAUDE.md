@@ -59,12 +59,15 @@ lib/
   supabase.js    ← Supabase client singleton
   pending.js     ← 群組問題待回應管理（Redis LIST, max 100）
 app/
-  admin/page.js  ← 管理後台（群組監控 + 學員匯入 + 比對狀態 + 學員對話紀錄）
-  api/webhook/route.js  ← 主入口（maxDuration=60，含私訊訊息合併 8s buffer）
-  api/admin/pending/route.js  ← 待回應 API
-  api/admin/import/route.js   ← 學員匯入 API
-  api/admin/users/route.js    ← 學員列表 API
-  api/admin/history/route.js  ← 學員對話紀錄 API（Supabase 讀取）
+  admin/page.js            ← 管理後台（群組監控 + 主動關心 + 手動草稿 + 匯入）
+  admin/students/page.js   ← 學員管理（獨立頁面：列表 + 分班 + 搜尋 + 對話紀錄）
+  api/webhook/route.js     ← 主入口（maxDuration=60，含私訊訊息合併 8s buffer）
+  api/admin/pending/route.js   ← 待回應 API
+  api/admin/import/route.js    ← 學員匯入 API
+  api/admin/users/route.js     ← 學員列表 API
+  api/admin/history/route.js   ← 學員對話紀錄 API（Supabase 讀取）
+  api/admin/outreach/route.js  ← 主動關心推播 API（pushMessage + 存 chatHistory）
+  api/admin/students/route.js  ← 學員管理 API（更新 class_name）
 ```
 
 ## Redis 資料結構

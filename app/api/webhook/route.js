@@ -10,7 +10,7 @@
  * 4. 非文字訊息 → 友善提示（僅私訊）
  */
 
-import { verifySignature, sendMessage, getProfile, getGroupMemberProfile, getGroupSummary } from '@/lib/line';
+import { verifySignature, sendMessage, replyWithQuickReply, getProfile, getGroupMemberProfile, getGroupSummary } from '@/lib/line';
 import { handleMessage, basicMessageFilter, aiDetectQuestion, generateDraftResponse } from '@/lib/ai';
 import { getChatHistory, addChatMessage, formatChatForGemini, addGroupMessage, getGroupContext } from '@/lib/chat';
 import { classifyIntent } from '@/lib/knowledge';
@@ -348,6 +348,13 @@ async function bufferAndSchedule(replyToken, userId, text) {
     }
   }
 
+  // === 選單觸發：Rich Menu 按鈕 → 問題 + Quick Reply 引導 ===
+  const menuTrigger = getMenuTrigger(trimmed);
+  if (menuTrigger) {
+    console.log(`[Menu] Trigger: "${trimmed}"`);
+    return await replyWithQuickReply(replyToken, menuTrigger.response, menuTrigger.quickReply);
+  }
+
   if (['怎麼用', '使用說明', '功能', '你能做什麼'].includes(trimmed)) {
     return await sendMessage(replyToken, userId,
       `我可以陪你聊的話題：
@@ -519,4 +526,62 @@ async function backgroundTagProcessing(userId, userText, aiReply) {
   } catch (err) {
     console.error('[Tags] Background processing error:', err);
   }
+}
+
+// ===== 選單觸發定義 =====
+
+const MENU_TRIGGERS = {
+  '下一餐吃什麼': {
+    response: '你等一下在哪吃？😊',
+    quickReply: [
+      { label: '🏪 便利商店', text: '便利商店可以買什麼ABC搭配' },
+      { label: '🍱 自助餐', text: '自助餐怎麼夾比較健康' },
+      { label: '🥞 早餐店', text: '早餐店怎麼點比較好' },
+      { label: '🍲 火鍋', text: '火鍋怎麼吃比較好' },
+      { label: '🍢 滷味/鹹水雞', text: '滷味鹹水雞怎麼選比較好' },
+      { label: '🍜 麵店', text: '麵店怎麼點比較好' },
+      { label: '🥡 便當店', text: '便當店怎麼選比較健康' },
+      { label: '🥪 Subway', text: 'Subway怎麼點比較健康' },
+    ]
+  },
+  '這個能吃嗎': {
+    response: '跟我說食物名稱，我幫你查分類和份量！\n\n或是直接點常被問的 👇',
+    quickReply: [
+      { label: '🌽 玉米', text: '玉米算什麼類別可以吃多少' },
+      { label: '🧈 百頁豆腐', text: '百頁豆腐可以吃嗎' },
+      { label: '🥛 燕麥奶', text: '燕麥奶算什麼類別' },
+      { label: '🍠 地瓜', text: '地瓜算什麼份量怎麼抓' },
+      { label: '🥑 酪梨', text: '酪梨算什麼類別' },
+      { label: '🥟 水餃', text: '水餃可以吃幾顆' },
+      { label: '🍗 雞翅', text: '雞翅可以吃嗎' },
+      { label: '❓ 其他食物', text: '我想問其他食物能不能吃' },
+    ]
+  },
+  '肚子餓了': {
+    response: '你現在大概什麼時間？',
+    quickReply: [
+      { label: '☀️ 上午餓', text: '上午肚子餓可以吃什麼' },
+      { label: '🌤️ 下午餓', text: '下午肚子餓可以吃什麼點心' },
+      { label: '🌙 睡前餓', text: '睡前肚子餓怎麼辦' },
+      { label: '🏢 在公司', text: '在公司肚子餓可以吃什麼' },
+    ]
+  },
+  '經期怎麼吃': {
+    response: '你現在是哪個階段？',
+    quickReply: [
+      { label: '😋 經前嘴饞', text: '經前很想吃甜食怎麼辦' },
+      { label: '🩸 經期中', text: '生理期中飲食要注意什麼' },
+      { label: '⚖️ 經期體重', text: '生理期體重上升正常嗎' },
+      { label: '🏃‍♀️ 經期運動', text: '生理期可以運動嗎' },
+    ]
+  },
+};
+
+/**
+ * 檢查是否為選單觸發文字
+ * @param {string} text - 用戶訊息
+ * @returns {object|null} 觸發定義或 null
+ */
+function getMenuTrigger(text) {
+  return MENU_TRIGGERS[text] || null;
 }
