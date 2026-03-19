@@ -34,8 +34,8 @@ export async function GET(request) {
   const sb = getSupabase();
   if (!sb) return NextResponse.json({ error: 'Supabase not configured' }, { status: 500 });
 
-  // 1. 取得所有有 class_name 的用戶
-  // 取得進行中的班級名稱（用於默認篩選）
+  // 1. 取得進行中的班級名稱（用於默認篩選）
+  const r = getRedis();
   const activeClassNames = [];
   const classNamesAll = [];
   const allClassKeys = await r.smembers('coach-classes-index');
@@ -69,7 +69,6 @@ export async function GET(request) {
   }
 
   // 2. 取得班級的開學日期
-  const r = getRedis();
   const classNames = [...new Set((users || []).map(u => u.class_name).filter(Boolean))];
   const classMap = {};
   for (const cn of classNames) {
