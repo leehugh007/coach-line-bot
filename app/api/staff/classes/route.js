@@ -92,7 +92,7 @@ export async function POST(request) {
   const classData = {
     startDate,
     endDate: endDate || null,
-    weeks: weeks || 8,
+    weeks: weeks || 12,
     pauseStart: pauseStart || null,  // 停課開始（例如過年）
     pauseEnd: pauseEnd || null,      // 停課結束
     createdAt: new Date().toISOString(),

@@ -46,7 +46,15 @@ function getWeeklyMessage(week, name, totalInteractions) {
 
     7: `${name}，倒數了！休校長說：「你不是重新開始，你是帶著經驗繼續前進。」\n\n不管中間有沒有哪天沒做好，你到現在都還在——這件事本身就值得肯定 ☺️`,
 
-    8: `${name}，最後一週了。\n\n不管數字怎麼樣，你已經學會了一套可以用一輩子的方法。這才是最重要的。\n\n「瘦是健康的附加價值。當你變健康了，瘦就是自然而然的事。」\n\n我是休校長小幫手，陪你健康的瘦一輩子 ☺️`,
+    8: `${name}，兩個月了！回想第一週連食物分類都搞不清楚，現在是不是看到什麼都會自動歸類了？\n\n這個改變是你一餐一餐累積出來的 ☺️\n\n${interactionNote}`,
+
+    9: `${name}，第九週了。有沒有發現身邊的人開始問你「你最近怎麼變瘦了」？\n\n如果有——恭喜你。如果還沒——繼續做，他們遲早會問 😄`,
+
+    10: `${name}，課程已經過了大半。這時候最重要的不是數字，是你建立起來的習慣。\n\n休校長說：「你是想瘦一陣子，還是瘦一輩子？」你現在學會的，是一輩子都能用的方法 ☺️`,
+
+    11: `${name}，倒數了！不管中間有沒有哪天沒做好，你到現在都還在——這件事本身就值得肯定。\n\n休校長說：「你不是重新開始，你是帶著經驗繼續前進。」\n\n${interactionNote}`,
+
+    12: `${name}，最後一週了。\n\n不管數字怎麼樣，你已經學會了一套可以用一輩子的方法。這才是最重要的。\n\n「瘦是健康的附加價值。當你變健康了，瘦就是自然而然的事。」\n\n我是休校長小幫手，陪你健康的瘦一輩子 ☺️`,
   };
 
   return messages[week] || null;
@@ -136,7 +144,7 @@ export async function GET(request) {
       // 計算課程週數
       const courseWeek = calcCourseWeek(classInfo, now);
       if (courseWeek === -1) continue; // 停課中
-      if (courseWeek < 1 || courseWeek > 8) continue;
+      if (courseWeek < 1 || courseWeek > 12) continue;
 
       // 查最後互動時間
       const { data: lastConv } = await sb.from('conversations')
