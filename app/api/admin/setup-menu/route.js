@@ -11,7 +11,7 @@ import { createRichMenu, uploadRichMenuImage, setDefaultRichMenu, listRichMenus,
 import { NextResponse } from 'next/server';
 
 function checkAuth(request) {
-  const key = request.headers.get('x-api-key');
+  const key = request.headers.get('x-admin-key');
   return key === process.env.ADMIN_API_KEY;
 }
 
