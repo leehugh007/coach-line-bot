@@ -160,29 +160,40 @@ async function handleGroupMessage(source, userId, text, mention) {
     }
   } catch (e) { /* 不阻塞主流程 */ }
 
-  // 1.7 偵測班長點名 → 自動推播關心訊息給被點名的人
-  const rollCallKeywords = ['點名', '沒上傳', '沒有上傳', '還沒上傳', '未上傳', '沒傳', '還沒傳'];
-  const isRollCall = rollCallKeywords.some(kw => trimmed.includes(kw));
+  // 1.7 偵測班長/助教點名 → 自動推播關心訊息給被點名的人
+  // 點名情境：沒上傳飲食、鼓勵發言、鼓勵分享、鼓勵互動等
   const mentionees = mention?.mentionees?.filter(m => m.userId) || [];
+  const rollCallKeywords = ['點名', '上傳', '餐點', '分享', '飲食', '還沒看到', '沒有看到', '跟上', '加油'];
+  const hasRollCallHint = rollCallKeywords.some(kw => trimmed.includes(kw));
 
-  if (isRollCall && mentionees.length > 0) {
+  if (mentionees.length >= 3 && hasRollCallHint) {
+    // @ 了 3 人以上 + 有點名相關關鍵字 = 很可能是點名
     console.log(`[RollCall] Detected! ${displayName} tagged ${mentionees.length} students`);
 
-    // 背景推播（不阻塞群組訊息處理）
     const rollCallPush = async () => {
-      const careMessages = [
+      // 根據點名內容決定推播語氣
+      const isAboutUpload = ['上傳', '餐點', '飲食', '還沒看到', '沒有看到'].some(kw => trimmed.includes(kw));
+
+      const uploadCareMessages = [
         (name) => `${name}，最近還好嗎？如果外食不知道怎麼選，按下面選單的「下一餐吃什麼」，跟我說你在哪吃，我幫你想搭配 😊`,
         (name) => `${name}，最近有遇到什麼困難嗎？不管是飲食上的還是心態上的，都可以跟我聊。我們一起想辦法 ☺️`,
-        (name) => `${name}，我整理了一些外食搭配的小撇步，你想看看嗎？按下面選單就能用 😊\n\n有任何問題也可以直接問我！`,
+        (name) => `${name}，分享一個小撇步：自助餐三格配菜都選蔬菜才剛好一餐的量。聽起來很多？試了就知道很快吃完 😄\n\n有問題隨時問我！`,
       ];
+
+      const encourageMessages = [
+        (name) => `${name}，最近在課程中有沒有什麼新發現？不管大小都可以跟我分享 ☺️`,
+        (name) => `${name}，課程到現在，有沒有什麼食物搭配是你覺得蠻順手的？跟我說說看 😊`,
+        (name) => `${name}，最近有什麼飲食或心態上的問題嗎？什麼都可以問我，不用客氣 ☺️`,
+      ];
+
+      const messages = isAboutUpload ? uploadCareMessages : encourageMessages;
 
       for (const m of mentionees) {
         try {
-          // 不推播給班長/助教/教練自己
+          // 不推播給發言者自己（班長/助教）和教練
           if (m.userId === userId || m.userId === process.env.COACH_USER_ID) continue;
 
-          const msgFn = careMessages[Math.floor(Math.random() * careMessages.length)];
-          // 嘗試取得學員名字
+          const msgFn = messages[Math.floor(Math.random() * messages.length)];
           let studentName = '同學';
           try {
             const profile = await getGroupMemberProfile(groupId, m.userId);
@@ -190,7 +201,7 @@ async function handleGroupMessage(source, userId, text, mention) {
           } catch (_) {}
 
           await pushMessage(m.userId, msgFn(studentName));
-          console.log(`[RollCall] Pushed care message to ${studentName}`);
+          console.log(`[RollCall] Pushed to ${studentName} (${isAboutUpload ? 'upload' : 'encourage'})`);
         } catch (err) {
           console.error(`[RollCall] Push failed for ${m.userId}:`, err.message);
         }
