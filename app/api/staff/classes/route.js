@@ -37,18 +37,35 @@ export async function GET(request) {
     const data = await r.get(`${CLASS_PREFIX}${name}`);
     if (data) {
       const parsed = typeof data === 'string' ? JSON.parse(data) : data;
-      // 計算目前週數
+      // 計算目前週數（扣掉停課天數）
       const now = new Date();
       const start = new Date(parsed.startDate);
-      const diffDays = Math.floor((now - start) / (1000 * 60 * 60 * 24));
-      const currentWeek = diffDays >= 0 ? Math.floor(diffDays / 7) + 1 : 0;
-      const isActive = diffDays >= 0 && (!parsed.endDate || now <= new Date(parsed.endDate));
+      let diffDays = Math.floor((now - start) / (1000 * 60 * 60 * 24));
+
+      // 扣除停課區間
+      let pauseDays = 0;
+      let isPaused = false;
+      if (parsed.pauseStart && parsed.pauseEnd) {
+        const ps = new Date(parsed.pauseStart);
+        const pe = new Date(parsed.pauseEnd);
+        isPaused = now >= ps && now <= pe;
+        if (now > pe) {
+          pauseDays = Math.floor((pe - ps) / (1000 * 60 * 60 * 24)) + 1;
+        } else if (now >= ps) {
+          pauseDays = Math.floor((now - ps) / (1000 * 60 * 60 * 24));
+        }
+      }
+
+      const effectiveDays = Math.max(0, diffDays - pauseDays);
+      const currentWeek = diffDays >= 0 ? Math.floor(effectiveDays / 7) + 1 : 0;
+      const isActive = diffDays >= 0 && !isPaused && (!parsed.endDate || now <= new Date(parsed.endDate));
 
       classes.push({
         ...parsed,
         name,
         currentWeek,
         isActive,
+        isPaused,
       });
     }
   }
@@ -65,7 +82,7 @@ export async function POST(request) {
   }
 
   const body = await request.json();
-  const { name, startDate, endDate, weeks } = body;
+  const { name, startDate, endDate, weeks, pauseStart, pauseEnd } = body;
 
   if (!name || !startDate) {
     return NextResponse.json({ error: 'name and startDate required' }, { status: 400 });
@@ -76,6 +93,8 @@ export async function POST(request) {
     startDate,
     endDate: endDate || null,
     weeks: weeks || 8,
+    pauseStart: pauseStart || null,  // 停課開始（例如過年）
+    pauseEnd: pauseEnd || null,      // 停課結束
     createdAt: new Date().toISOString(),
   };
 

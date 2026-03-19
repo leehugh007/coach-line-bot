@@ -23,6 +23,8 @@ export default function StaffPage() {
   const [newClassName, setNewClassName] = useState('');
   const [newStartDate, setNewStartDate] = useState('');
   const [newEndDate, setNewEndDate] = useState('');
+  const [newPauseStart, setNewPauseStart] = useState('');
+  const [newPauseEnd, setNewPauseEnd] = useState('');
 
   // 名單上傳
   const [importText, setImportText] = useState('');
@@ -86,11 +88,16 @@ export default function StaffPage() {
     await fetch('/api/staff/classes', {
       method: 'POST',
       headers,
-      body: JSON.stringify({ name: newClassName, startDate: newStartDate, endDate: newEndDate || null }),
+      body: JSON.stringify({
+        name: newClassName, startDate: newStartDate, endDate: newEndDate || null,
+        pauseStart: newPauseStart || null, pauseEnd: newPauseEnd || null,
+      }),
     });
     setNewClassName('');
     setNewStartDate('');
     setNewEndDate('');
+    setNewPauseStart('');
+    setNewPauseEnd('');
     loadClasses();
   };
 
@@ -250,6 +257,19 @@ export default function StaffPage() {
               </div>
               <button onClick={addClass} style={{ padding: '8px 20px', borderRadius: 8, border: 'none', background: '#E8734A', color: 'white', cursor: 'pointer', fontWeight: 600 }}>新增</button>
             </div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <label style={{ fontSize: 13, color: '#999' }}>停課起</label>
+                <input type="date" value={newPauseStart} onChange={e => setNewPauseStart(e.target.value)}
+                  style={{ padding: '8px 10px', borderRadius: 8, border: '1px solid #ddd', fontSize: 14 }} />
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <label style={{ fontSize: 13, color: '#999' }}>停課迄</label>
+                <input type="date" value={newPauseEnd} onChange={e => setNewPauseEnd(e.target.value)}
+                  style={{ padding: '8px 10px', borderRadius: 8, border: '1px solid #ddd', fontSize: 14 }} />
+              </div>
+              <span style={{ fontSize: 12, color: '#999', lineHeight: '36px' }}>選填，例如過年停課一週</span>
+            </div>
           </div>
 
           {classes.length === 0 ? (
@@ -265,10 +285,12 @@ export default function StaffPage() {
                   <div>
                     <div style={{ fontWeight: 700, fontSize: 16 }}>
                       {c.name}
-                      {c.isActive && <span style={{ fontSize: 12, color: '#E8734A', marginLeft: 8 }}>進行中 · 第{c.currentWeek}週</span>}
+                      {c.isPaused && <span style={{ fontSize: 12, color: '#F57F17', marginLeft: 8 }}>⏸ 停課中</span>}
+                    {c.isActive && !c.isPaused && <span style={{ fontSize: 12, color: '#E8734A', marginLeft: 8 }}>進行中 · 第{c.currentWeek}週</span>}
                     </div>
                     <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>
                       {c.startDate} ~ {c.endDate || '未設定'} · {c.weeks}週
+                      {c.pauseStart && c.pauseEnd && <span style={{ color: '#F57F17' }}> · 停課 {c.pauseStart}~{c.pauseEnd}</span>}
                     </div>
                   </div>
                   <button onClick={() => deleteClass(c.name)} style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid #ddd', background: 'white', color: '#c00', cursor: 'pointer', fontSize: 12 }}>刪除</button>
