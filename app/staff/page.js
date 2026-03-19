@@ -33,6 +33,12 @@ export default function StaffPage() {
   const [importResult, setImportResult] = useState(null);
   const [preloadedList, setPreloadedList] = useState(null);
 
+  // 主動關心
+  const [outreachSelected, setOutreachSelected] = useState(new Set());
+  const [outreachMsg, setOutreachMsg] = useState('{name}，最近還好嗎？有遇到什麼飲食或心態上的問題都可以跟我聊 ☺️');
+  const [outreachSending, setOutreachSending] = useState(false);
+  const [outreachResult, setOutreachResult] = useState(null);
+
   // Auth
   useEffect(() => {
     const saved = localStorage.getItem('coach-staff-key');
@@ -165,8 +171,54 @@ export default function StaffPage() {
     );
   }
 
+  // 主動關心：可選的學員（有 userId + 狀態為 care/watch/never 的）
+  const outreachCandidates = students.filter(s => s.userId && ['care', 'watch', 'never'].includes(s.status));
+
+  const toggleOutreachSelect = (userId) => {
+    setOutreachSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(userId)) next.delete(userId);
+      else next.add(userId);
+      return next;
+    });
+  };
+
+  const selectAllOutreach = () => {
+    if (outreachSelected.size === outreachCandidates.length) {
+      setOutreachSelected(new Set());
+    } else {
+      setOutreachSelected(new Set(outreachCandidates.map(s => s.userId)));
+    }
+  };
+
+  const sendOutreach = async () => {
+    if (outreachSelected.size === 0) return alert('請先勾選要關心的學員');
+    if (!outreachMsg.trim()) return alert('請輸入訊息');
+    if (!confirm(`確定發送給 ${outreachSelected.size} 位學員？`)) return;
+
+    setOutreachSending(true);
+    setOutreachResult(null);
+    try {
+      const users = students
+        .filter(s => outreachSelected.has(s.userId))
+        .map(s => ({ id: s.userId, name: s.name }));
+      const res = await fetch('/api/admin/outreach', {
+        method: 'POST',
+        headers: { 'x-staff-key': staffKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ users, message: outreachMsg }),
+      });
+      const data = await res.json();
+      setOutreachResult(data);
+      if (data.sent > 0) setOutreachSelected(new Set());
+    } catch (err) {
+      setOutreachResult({ error: err.message });
+    }
+    setOutreachSending(false);
+  };
+
   const tabs = [
     { id: 'students', label: '學員狀態' },
+    { id: 'outreach', label: `主動關心${outreachCandidates.length > 0 ? ` (${outreachCandidates.length})` : ''}` },
     { id: 'classes', label: '班級管理' },
     { id: 'import', label: '名單上傳' },
   ];
@@ -250,6 +302,89 @@ export default function StaffPage() {
                 })}
               </tbody>
             </table>
+          )}
+        </div>
+      )}
+
+      {/* ===== 主動關心 ===== */}
+      {tab === 'outreach' && (
+        <div>
+          {/* 訊息模板 */}
+          <div style={{ background: '#f9f9f9', borderRadius: 12, padding: 20, marginBottom: 20 }}>
+            <h3 style={{ margin: '0 0 8px', fontSize: 16 }}>關心訊息</h3>
+            <p style={{ fontSize: 13, color: '#888', margin: '0 0 12px' }}>用 {'{name}'} 代入學員名字。發送後會存入對話紀錄，學員回覆時小幫手會知道上下文。</p>
+            <textarea
+              value={outreachMsg}
+              onChange={e => setOutreachMsg(e.target.value)}
+              rows={3}
+              style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid #ddd', fontSize: 14, resize: 'vertical', boxSizing: 'border-box' }}
+            />
+            <div style={{ display: 'flex', gap: 8, marginTop: 10, alignItems: 'center' }}>
+              <button onClick={sendOutreach} disabled={outreachSending || outreachSelected.size === 0}
+                style={{ padding: '10px 24px', borderRadius: 8, border: 'none', background: outreachSelected.size > 0 ? '#E8734A' : '#ccc', color: 'white', cursor: outreachSelected.size > 0 ? 'pointer' : 'default', fontWeight: 600, fontSize: 14 }}>
+                {outreachSending ? '發送中...' : `發送給 ${outreachSelected.size} 位學員`}
+              </button>
+              {outreachResult && (
+                <span style={{ fontSize: 13, color: outreachResult.error ? '#C62828' : '#2E7D32' }}>
+                  {outreachResult.error ? `失敗：${outreachResult.error}` : `已發送 ${outreachResult.sent} 位${outreachResult.failed > 0 ? `，${outreachResult.failed} 位失敗` : ''}`}
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* 學員列表（可勾選） */}
+          {outreachCandidates.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: 40, color: '#888' }}>
+              {students.length === 0 ? '請先載入學員' : '目前沒有需要關心的學員（全部都在活躍狀態）'}
+            </div>
+          ) : (
+            <>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                <label style={{ fontSize: 14, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <input type="checkbox" checked={outreachSelected.size === outreachCandidates.length} onChange={selectAllOutreach} />
+                  全選（{outreachCandidates.length} 位）
+                </label>
+                <span style={{ fontSize: 12, color: '#888' }}>
+                  🔴 需關心 {outreachCandidates.filter(s => s.status === 'care').length}
+                  · 🟡 待關注 {outreachCandidates.filter(s => s.status === 'watch').length}
+                  · ⚪ 未互動 {outreachCandidates.filter(s => s.status === 'never').length}
+                </span>
+              </div>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+                <thead>
+                  <tr style={{ background: '#f9f9f9', textAlign: 'left' }}>
+                    <th style={{ padding: '10px 8px', borderBottom: '2px solid #eee', width: 36 }}></th>
+                    <th style={{ padding: '10px 8px', borderBottom: '2px solid #eee' }}>學員</th>
+                    <th style={{ padding: '10px 8px', borderBottom: '2px solid #eee' }}>班級</th>
+                    <th style={{ padding: '10px 8px', borderBottom: '2px solid #eee' }}>互動</th>
+                    <th style={{ padding: '10px 8px', borderBottom: '2px solid #eee' }}>最後互動</th>
+                    <th style={{ padding: '10px 8px', borderBottom: '2px solid #eee' }}>狀態</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {outreachCandidates.map((s, i) => {
+                    const st = STATUS_MAP[s.status] || STATUS_MAP.unknown;
+                    return (
+                      <tr key={i} style={{ background: s.status === 'care' ? '#FFF5F5' : s.status === 'watch' ? '#FFFDE7' : 'white', cursor: 'pointer' }}
+                        onClick={() => toggleOutreachSelect(s.userId)}>
+                        <td style={{ padding: '10px 8px', borderBottom: '1px solid #f0f0f0' }}>
+                          <input type="checkbox" checked={outreachSelected.has(s.userId)} onChange={() => toggleOutreachSelect(s.userId)} />
+                        </td>
+                        <td style={{ padding: '10px 8px', borderBottom: '1px solid #f0f0f0', fontWeight: 600 }}>{s.name}</td>
+                        <td style={{ padding: '10px 8px', borderBottom: '1px solid #f0f0f0', color: '#666' }}>{s.className || '-'}</td>
+                        <td style={{ padding: '10px 8px', borderBottom: '1px solid #f0f0f0' }}>{s.totalInteractions}次</td>
+                        <td style={{ padding: '10px 8px', borderBottom: '1px solid #f0f0f0', color: '#888', fontSize: 12 }}>
+                          {s.lastInteraction ? new Date(s.lastInteraction).toLocaleDateString('zh-TW') : '從未'}
+                        </td>
+                        <td style={{ padding: '10px 8px', borderBottom: '1px solid #f0f0f0' }}>
+                          <span style={{ padding: '2px 8px', borderRadius: 10, fontSize: 12, fontWeight: 600, background: st.bg, color: st.color }}>{st.label}</span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </>
           )}
         </div>
       )}
