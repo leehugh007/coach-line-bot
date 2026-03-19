@@ -579,6 +579,19 @@ async function processBatchedMessages(userId, messages) {
       }
     }
 
+    // === 補救：display_name 缺失時主動 fetch LINE profile ===
+    if (user && !user.lineDisplayName) {
+      try {
+        const profile = await getProfile(userId);
+        if (profile?.displayName) {
+          user.lineDisplayName = profile.displayName;
+          const { saveUser } = await import('@/lib/user');
+          await saveUser(userId, user);
+          console.log(`[MSG] Updated missing displayName: ${profile.displayName}`);
+        }
+      } catch (_) { /* 不阻塞主流程 */ }
+    }
+
     // === 檢查是否是自我介紹 ===
     let isIntro = false;
     if (looksLikeIntroduction(combinedText)) {

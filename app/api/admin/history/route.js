@@ -45,11 +45,24 @@ export async function GET(request) {
         .single(),
     ]);
 
+    // 解析 coaching_tags：tag 欄位是 "topic:emotion:progress:style" 冒號字串
+    const parsedTags = (tagRes.data || []).map(row => {
+      const parts = (row.tag || '').split(':');
+      return {
+        topic: parts[0] || '?',
+        emotion: parts[1] || '?',
+        progress_signal: parts[2] || 'neutral',
+        conversation_style: parts[3] || 'asking',
+        core_issue: row.core_issue || null,
+        date: row.created_at,
+      };
+    });
+
     return NextResponse.json({
       ok: true,
       user: userRes.data || null,
       conversations: convRes.data || [],
-      tags: tagRes.data || [],
+      tags: parsedTags,
     });
   }
 

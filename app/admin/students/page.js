@@ -26,6 +26,10 @@ export default function StudentsPage() {
   const [editingClass, setEditingClass] = useState(null);
   const [classInput, setClassInput] = useState('');
 
+  // 批量分班
+  const [batchClassInput, setBatchClassInput] = useState('');
+  const [batchLoading, setBatchLoading] = useState(false);
+
   // 自動恢復登入（直接信任，不重新驗證）
   useEffect(() => {
     const saved = localStorage.getItem('coach-admin-key');
@@ -103,6 +107,31 @@ export default function StudentsPage() {
     }
     setEditingClass(null);
     setClassInput('');
+  }
+
+  async function batchAssignClass() {
+    const className = batchClassInput.trim();
+    if (!className) return;
+    const unassigned = students.filter(s => !s.class_name && s.conversation_count > 0);
+    if (unassigned.length === 0) { alert('沒有需要分班的學員'); return; }
+    if (!confirm(`確定要把 ${unassigned.length} 位未分班學員全部分到「${className}」嗎？`)) return;
+
+    setBatchLoading(true);
+    let success = 0;
+    for (const s of unassigned) {
+      try {
+        const res = await fetch('/api/admin/students', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-admin-key': adminKey },
+          body: JSON.stringify({ userId: s.id, className }),
+        });
+        if (res.ok) success++;
+      } catch (_) {}
+    }
+    setBatchLoading(false);
+    setBatchClassInput('');
+    alert(`已完成：${success}/${unassigned.length} 位學員分到「${className}」`);
+    loadStudents();
   }
 
   // 取得所有班別（用於篩選）
@@ -309,6 +338,22 @@ export default function StudentsPage() {
               <button onClick={() => setClassFilter('unassigned')}
                 style={{ padding: '4px 12px', borderRadius: 20, fontSize: 12, cursor: 'pointer', border: classFilter === 'unassigned' ? '2px solid #FF9800' : '1px solid #ddd', background: classFilter === 'unassigned' ? '#FFF3E0' : 'white', color: classFilter === 'unassigned' ? '#E65100' : '#666', fontWeight: classFilter === 'unassigned' ? 600 : 400 }}>
                 未分班 ({students.filter(s => !s.class_name).length})
+              </button>
+            </div>
+          )}
+
+          {/* 批量分班 */}
+          {students.filter(s => !s.class_name && s.conversation_count > 0).length > 0 && (
+            <div style={{ marginTop: 10, display: 'flex', gap: 8, alignItems: 'center' }}>
+              <span style={{ fontSize: 12, color: '#888', whiteSpace: 'nowrap' }}>批量分班：</span>
+              <input type="text" value={batchClassInput} onChange={(e) => setBatchClassInput(e.target.value)}
+                placeholder={allClasses[0] || '班別名稱'}
+                style={{ flex: 1, padding: '6px 10px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13, boxSizing: 'border-box' }}
+                onKeyDown={(e) => { if (e.key === 'Enter') batchAssignClass(); }}
+              />
+              <button onClick={batchAssignClass} disabled={batchLoading}
+                style={{ padding: '6px 14px', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer', background: '#FF9800', color: 'white', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                {batchLoading ? '分配中...' : `全部分到此班（${students.filter(s => !s.class_name && s.conversation_count > 0).length}人）`}
               </button>
             </div>
           )}
