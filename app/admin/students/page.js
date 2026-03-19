@@ -342,19 +342,16 @@ export default function StudentsPage() {
             </div>
           )}
 
-          {/* 批量分班 */}
-          {students.filter(s => !s.class_name && s.conversation_count > 0).length > 0 && (
+          {/* 新增班別 */}
+          {students.filter(s => !s.class_name).length > 0 && (
             <div style={{ marginTop: 10, display: 'flex', gap: 8, alignItems: 'center' }}>
-              <span style={{ fontSize: 12, color: '#888', whiteSpace: 'nowrap' }}>批量分班：</span>
+              <span style={{ fontSize: 12, color: '#888', whiteSpace: 'nowrap' }}>新增班別：</span>
               <input type="text" value={batchClassInput} onChange={(e) => setBatchClassInput(e.target.value)}
-                placeholder={allClasses[0] || '班別名稱'}
+                placeholder="輸入新班別名稱（例：2026年3月班）"
                 style={{ flex: 1, padding: '6px 10px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13, boxSizing: 'border-box' }}
-                onKeyDown={(e) => { if (e.key === 'Enter') batchAssignClass(); }}
+                onKeyDown={(e) => { if (e.key === 'Enter' && batchClassInput.trim()) { setClassFilter('all'); setBatchClassInput(''); } }}
               />
-              <button onClick={batchAssignClass} disabled={batchLoading}
-                style={{ padding: '6px 14px', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer', background: '#FF9800', color: 'white', fontWeight: 600, whiteSpace: 'nowrap' }}>
-                {batchLoading ? '分配中...' : `全部分到此班（${students.filter(s => !s.class_name && s.conversation_count > 0).length}人）`}
-              </button>
+              <span style={{ fontSize: 11, color: '#aaa' }}>輸入後會出現在快捷按鈕中</span>
             </div>
           )}
         </div>
@@ -388,23 +385,37 @@ export default function StudentsPage() {
                     <div style={{ fontSize: 13, color: '#7B1FA2', fontWeight: 600 }}>{s.conversation_count || 0} 則</div>
                     <div style={{ fontSize: 11, color: '#aaa' }}>{timeAgo(s.updated_at)}</div>
                   </div>
-                  {/* 分班按鈕 */}
-                  <button
-                    onClick={(e) => { e.stopPropagation(); setEditingClass(s.id); setClassInput(s.class_name || ''); }}
-                    style={{ padding: '4px 8px', border: '1px solid #ddd', borderRadius: 6, fontSize: 11, cursor: 'pointer', background: 'white', color: '#888' }}
-                    title="設定班別"
-                  >
-                    {s.class_name ? '改班' : '分班'}
-                  </button>
+                  {/* 快捷分班按鈕 */}
+                  {!s.class_name ? (
+                    <div style={{ display: 'flex', gap: 4, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
+                      {[...allClasses, ...(batchClassInput.trim() && !allClasses.includes(batchClassInput.trim()) ? [batchClassInput.trim()] : [])].map(c => (
+                        <button key={c} onClick={() => updateClass(s.id, c)}
+                          style={{ padding: '3px 8px', border: '1px solid #7B1FA2', borderRadius: 6, fontSize: 10, cursor: 'pointer', background: 'white', color: '#7B1FA2', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                          {c}
+                        </button>
+                      ))}
+                      <button onClick={() => { setEditingClass(s.id); setClassInput(''); }}
+                        style={{ padding: '3px 6px', border: '1px solid #ddd', borderRadius: 6, fontSize: 10, cursor: 'pointer', background: 'white', color: '#aaa' }}
+                        title="自訂班別">
+                        ⋯
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setEditingClass(s.id); setClassInput(s.class_name || ''); }}
+                      style={{ padding: '4px 8px', border: '1px solid #ddd', borderRadius: 6, fontSize: 11, cursor: 'pointer', background: 'white', color: '#888' }}>
+                      改班
+                    </button>
+                  )}
                 </div>
               </div>
 
-              {/* 分班編輯（展開） */}
+              {/* 自訂分班編輯（展開） */}
               {editingClass === s.id && (
                 <div style={{ padding: '8px 16px 14px', background: '#FAFAFA', display: 'flex', gap: 8, alignItems: 'center' }}
                   onClick={(e) => e.stopPropagation()}>
                   <input type="text" value={classInput} onChange={(e) => setClassInput(e.target.value)}
-                    placeholder="班別名稱（例：3月A班）" autoFocus
+                    placeholder="班別名稱" autoFocus
                     style={{ flex: 1, padding: '6px 10px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13, boxSizing: 'border-box' }}
                     onKeyDown={(e) => { if (e.key === 'Enter') updateClass(s.id, classInput.trim()); }}
                   />
