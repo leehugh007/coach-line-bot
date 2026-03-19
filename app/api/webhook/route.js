@@ -19,7 +19,8 @@ import { bufferMessage, isBufferReady, consumeBuffer, BATCH_DELAY, TEXT_EXTRA_DE
 import {
   looksLikeIntroduction, processIntroduction,
   getUser, recordInteraction, buildUserContext,
-  tryMatchPreloaded,
+  tryMatchPreloaded, isLinNameDuplicate, setPendingVerify,
+  getPendingVerify, clearPendingVerify, tryMatchByRealName,
 } from '@/lib/user';
 import {
   extractCoachingTags, saveCoachingTags,
@@ -270,26 +271,54 @@ async function handleGroupMessage(source, userId, text) {
 async function handleFollow(replyToken, userId) {
   console.log('[Follow] New user:', userId?.substring(0, 8));
 
-  // 嘗試用 LINE 顯示名稱比對預載入資料
+  let matched = false;
+  let needVerify = false;
+
   try {
     const profile = await getProfile(userId);
     if (profile?.displayName) {
-      const matched = await tryMatchPreloaded(userId, profile.displayName);
-      if (matched) {
-        console.log(`[Follow] Auto-matched preloaded intro for ${profile.displayName}`);
+      // 先檢查是否有重名
+      const isDupe = await isLinNameDuplicate(profile.displayName);
+      if (isDupe) {
+        // 有重名：不自動比對，要求確認姓名
+        needVerify = true;
+        await setPendingVerify(userId, profile.displayName);
+        console.log(`[Follow] Duplicate LINE name: ${profile.displayName}, requesting verification`);
+      } else {
+        // 沒有重名：嘗試自動比對
+        matched = await tryMatchPreloaded(userId, profile.displayName);
+        if (matched) {
+          console.log(`[Follow] Auto-matched preloaded intro for ${profile.displayName}`);
+        } else {
+          // 沒比對到（可能不在名單裡，或名稱不一樣）→ 也要求確認
+          needVerify = true;
+          await setPendingVerify(userId, profile.displayName);
+          console.log(`[Follow] No match for ${profile.displayName}, requesting verification`);
+        }
       }
     }
   } catch (err) {
     console.error('[Follow] Match error:', err);
   }
 
-  const welcome = `嗨！我是休校長的小幫手 🙌
+  let welcome;
+  if (needVerify) {
+    // 需要確認身份：先問姓名，再給正式歡迎
+    welcome = `嗨！我是休校長的小幫手 🙌
+
+歡迎加入！為了幫你建立專屬檔案，請先跟我說一下你報名時填的姓名 ☺️
+
+（直接打名字就好，例如「王美玲」）`;
+  } else {
+    // 已自動比對成功：正式歡迎
+    welcome = `嗨！我是休校長的小幫手 🙌
 
 不知道下一餐怎麼搭？跟我說你平常在哪裡買（便利商店？自助餐？早餐店？），我幫你想幾個 ABC 搭配，直接照著買就好 😊
 
 「這個能不能吃？」「玉米算澱粉嗎？」這種小問題也可以直接問我，秒回你。
 
 課程中有任何問題也隨時來聊——不好意思在群組問的、心態有點卡的，這裡什麼都可以聊。休校長也看得到喔 ☺️`;
+  }
 
   await sendMessage(replyToken, userId, welcome);
 }
@@ -346,6 +375,31 @@ async function bufferAndSchedule(replyToken, userId, text) {
       console.error('[Reset] Error:', err);
       return await sendMessage(replyToken, userId, `清除失敗：${err.message}`);
     }
+  }
+
+  // === 姓名確認：重名或未比對時，學員回覆姓名 ===
+  const pendingVerify = await getPendingVerify(userId);
+  if (pendingVerify) {
+    // 學員正在回覆姓名（2-6個中文字，沒有其他複雜內容）
+    const isLikelyName = /^[\u4e00-\u9fff]{2,6}$/.test(trimmed) || /^[a-zA-Z\s]{2,20}$/.test(trimmed);
+    if (isLikelyName) {
+      const matched = await tryMatchByRealName(userId, trimmed);
+      await clearPendingVerify(userId);
+
+      if (matched) {
+        console.log(`[Verify] Matched by real name: ${trimmed}`);
+        return await sendMessage(replyToken, userId,
+          `找到了！歡迎你 ${trimmed} ☺️\n\n不知道下一餐怎麼搭？跟我說你平常在哪裡買（便利商店？自助餐？早餐店？），我幫你想幾個 ABC 搭配，直接照著買就好 😊\n\n「這個能不能吃？」「玉米算澱粉嗎？」這種小問題也可以直接問我。\n\n課程中有任何問題也隨時來聊，休校長也看得到喔 ☺️`
+        );
+      } else {
+        console.log(`[Verify] No match for real name: ${trimmed}`);
+        return await sendMessage(replyToken, userId,
+          `沒關係！我先記住你了 ☺️\n\n不知道下一餐怎麼搭？跟我說你平常在哪裡買（便利商店？自助餐？早餐店？），我幫你想幾個 ABC 搭配，直接照著買就好 😊\n\n有任何問題隨時來聊！`
+        );
+      }
+    }
+    // 如果回覆的不像姓名（例如直接問問題），清除 pending 繼續正常流程
+    await clearPendingVerify(userId);
   }
 
   // === 選單觸發：Rich Menu 按鈕 → 問題 + Quick Reply 引導 ===
