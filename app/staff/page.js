@@ -294,49 +294,25 @@ export default function StaffPage() {
               </select>
             </div>
 
-            {/* 範本下載 + Excel 上傳 */}
+            {/* 說明 */}
             <div style={{ marginBottom: 16, padding: 16, background: '#E3F2FD', borderRadius: 12 }}>
-              <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>Excel 格式說明</div>
-              <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse', background: 'white', borderRadius: 8, overflow: 'hidden' }}>
-                <thead>
-                  <tr style={{ background: '#f5f5f5' }}>
-                    <th style={{ padding: '8px 10px', textAlign: 'left', borderBottom: '1px solid #eee' }}>LINE名稱 *必填</th>
-                    <th style={{ padding: '8px 10px', textAlign: 'left', borderBottom: '1px solid #eee' }}>真實姓名</th>
-                    <th style={{ padding: '8px 10px', textAlign: 'left', borderBottom: '1px solid #eee' }}>學號</th>
-                    <th style={{ padding: '8px 10px', textAlign: 'left', borderBottom: '1px solid #eee' }}>自我介紹</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr><td style={{ padding: '6px 10px', color: '#666' }}>Elaine Yeh</td><td style={{ padding: '6px 10px', color: '#666' }}>宜萍</td><td style={{ padding: '6px 10px', color: '#666' }}>2603001</td><td style={{ padding: '6px 10px', color: '#666' }}>金融業，第二期學員</td></tr>
-                  <tr><td style={{ padding: '6px 10px', color: '#666' }}>Annie</td><td style={{ padding: '6px 10px', color: '#666' }}>Annie</td><td style={{ padding: '6px 10px', color: '#666' }}>2603002</td><td style={{ padding: '6px 10px', color: '#666' }}>12月班班長</td></tr>
-                </tbody>
-              </table>
-              <div style={{ fontSize: 12, color: '#1565C0', marginTop: 8 }}>
-                * LINE名稱 = 學員在 LINE 上的顯示名稱（用來自動比對）<br/>
-                * 其他欄位選填，欄位名稱只要包含關鍵字就能對到（例如「LINE帳號」「暱稱」都行）
+              <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>直接上傳報名表 Excel</div>
+              <div style={{ fontSize: 13, color: '#1565C0', lineHeight: 1.8 }}>
+                系統會自動抓取以下欄位：<br/>
+                - <strong>LINE顯示名稱</strong>（J欄）→ 用來比對學員<br/>
+                - <strong>姓名</strong>（C欄）→ 真實姓名<br/>
+                - <strong>編號</strong>（B欄）→ 學號<br/>
+                - <strong>班級</strong>（A欄）→ A班/B班<br/>
+                - 班級月份從工作表標題自動偵測（例如「2026年3月班」）<br/><br/>
+                直接上傳報名表就好，不用另外整理格式。
               </div>
-              <button
-                onClick={() => {
-                  const wb = XLSX.utils.book_new();
-                  const ws = XLSX.utils.aoa_to_sheet([
-                    ['LINE名稱', '真實姓名', '學號', '自我介紹'],
-                    ['（學員的LINE顯示名稱）', '（真實姓名）', '（選填）', '（從群組複製自介，選填）'],
-                  ]);
-                  ws['!cols'] = [{ wch: 20 }, { wch: 12 }, { wch: 12 }, { wch: 40 }];
-                  XLSX.utils.book_append_sheet(wb, ws, '學員名單');
-                  XLSX.writeFile(wb, '學員名單範本.xlsx');
-                }}
-                style={{ marginTop: 10, padding: '6px 16px', borderRadius: 6, border: '1px solid #1565C0', background: 'white', color: '#1565C0', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}
-              >
-                📥 下載 Excel 範本
-              </button>
             </div>
 
             <div style={{ marginBottom: 16, padding: 20, border: '2px dashed #ddd', borderRadius: 12, textAlign: 'center', background: 'white' }}>
               <div style={{ fontSize: 28, marginBottom: 8 }}>📄</div>
-              <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>上傳填好的 Excel</div>
+              <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>上傳報名表 Excel</div>
               <div style={{ fontSize: 12, color: '#888', marginBottom: 12 }}>
-                支援 .xlsx / .xls / .csv
+                支援 .xlsx / .xls / .csv（直接上傳原始報名表即可）
               </div>
               <input
                 type="file"
@@ -347,38 +323,75 @@ export default function StaffPage() {
                   try {
                     const data = await file.arrayBuffer();
                     const wb = XLSX.read(data);
-                    const ws = wb.Sheets[wb.SheetNames[0]];
+                    const sheetName = wb.SheetNames[0];
+                    const ws = wb.Sheets[sheetName];
                     const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
 
                     if (rows.length === 0) return alert('Excel 裡沒有資料');
 
-                    // 自動偵測欄位名稱（支援多種命名）
+                    // 從工作表標題偵測班級月份（例如「【2026年3月班】」）
+                    const titleMatch = sheetName.match(/(\d{4}年\d{1,2}月班)/);
+                    let detectedClass = titleMatch ? titleMatch[1] : '';
+                    // 也從檔案名稱偵測
+                    if (!detectedClass) {
+                      const fileMatch = file.name.match(/(\d{4}年\d{1,2}月班)/);
+                      if (fileMatch) detectedClass = fileMatch[1];
+                    }
+
+                    // 自動偵測欄位（針對報名表格式）
                     const cols = Object.keys(rows[0]);
-                    const findCol = (keywords) => cols.find(c => keywords.some(k => c.toLowerCase().includes(k)));
-                    const lineCol = findCol(['line', '名稱', 'line名', '帳號', '暱稱', 'display']);
-                    const nameCol = findCol(['真實', '姓名', '本名', 'name', '名字']);
-                    const introCol = findCol(['自介', '介紹', 'intro', '自我']);
-                    const idCol = findCol(['學號', 'id', '編號', 'student']);
+                    // LINE顯示名稱：包含 'line' 的欄位（排除 Line ID）
+                    const lineCol = cols.find(c => c.toLowerCase().includes('line') && (c.includes('名稱') || c.includes('顯示')))
+                      || cols.find(c => c.toLowerCase().includes('line') && !c.toLowerCase().includes('id'));
+                    // 姓名：包含 '姓名' 但不含 'line' 的欄位
+                    const nameCol = cols.find(c => c.includes('姓名') && !c.toLowerCase().includes('line'))
+                      || cols.find(c => c.includes('名字') || c === '姓名');
+                    // 編號/學號
+                    const idCol = cols.find(c => c.includes('編號') || c.includes('學號'));
+                    // 班級（A/B）
+                    const subClassCol = cols.find(c => c === '班級');
 
                     if (!lineCol) {
-                      alert(`找不到「LINE 名稱」欄位。\n偵測到的欄位：${cols.join(', ')}\n\n請確認 Excel 裡有包含 LINE 名稱的欄位`);
+                      alert(`找不到「LINE顯示名稱」欄位。\n偵測到的欄位：${cols.join(', ')}\n\n請確認 Excel 裡有「LINE顯示名稱」欄位`);
                       return;
                     }
 
+                    // 過濾掉 LINE名稱 為空的行
+                    const validRows = rows.filter(r => r[lineCol] && String(r[lineCol]).trim());
+
                     // 轉成預覽文字
-                    const preview = rows.map(r => {
-                      const parts = [r[lineCol]];
-                      if (nameCol && r[nameCol]) parts.push(r[nameCol]);
-                      if (introCol && r[introCol]) parts.push(r[introCol]);
+                    const preview = validRows.map(r => {
+                      const lineName = String(r[lineCol]).trim();
+                      const realName = nameCol ? String(r[nameCol] || '').trim() : '';
+                      const studentId = idCol ? String(r[idCol] || '').trim() : '';
+                      const subClass = subClassCol ? String(r[subClassCol] || '').trim() : '';
+                      const parts = [lineName];
+                      if (realName) parts.push(realName);
+                      if (studentId) parts.push(studentId);
                       return parts.join(' | ');
                     }).join('\n');
 
                     setImportText(preview);
-                    alert(`成功讀取 ${rows.length} 筆資料，請確認後點「上傳名單」`);
+
+                    // 自動設定班級
+                    if (detectedClass && !importClassName) {
+                      // 檢查班級是否已存在，如果有 A/B 班就附加
+                      const hasAB = validRows.some(r => subClassCol && ['A', 'B'].includes(String(r[subClassCol]).trim().toUpperCase()));
+                      if (hasAB) {
+                        setImportClassName(detectedClass); // 後面 import 時再根據 A/B 分
+                      } else {
+                        setImportClassName(detectedClass);
+                      }
+                    }
+
+                    const subClasses = subClassCol ? [...new Set(validRows.map(r => String(r[subClassCol] || '').trim()).filter(Boolean))] : [];
+                    const subInfo = subClasses.length > 0 ? `（${subClasses.join('/')}班）` : '';
+
+                    alert(`成功讀取 ${validRows.length} 位學員 ${subInfo}\n${detectedClass ? `偵測到班級：${detectedClass}` : '請在上方選擇班級'}\n\n請確認後點「上傳名單」`);
                   } catch (err) {
                     alert('讀取 Excel 失敗：' + err.message);
                   }
-                  e.target.value = ''; // reset input
+                  e.target.value = '';
                 }}
                 style={{ fontSize: 14 }}
               />
