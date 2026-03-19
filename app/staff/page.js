@@ -1,5 +1,6 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
+import * as XLSX from 'xlsx';
 
 const STATUS_MAP = {
   active: { label: '🟢 活躍', color: '#2E7D32', bg: '#E8F5E9' },
@@ -284,7 +285,7 @@ export default function StaffPage() {
           <div style={{ background: '#f9f9f9', borderRadius: 12, padding: 20 }}>
             <h3 style={{ margin: '0 0 12px', fontSize: 16 }}>上傳學員名單</h3>
 
-            <div style={{ marginBottom: 12 }}>
+            <div style={{ marginBottom: 16 }}>
               <label style={{ fontSize: 13, color: '#666', display: 'block', marginBottom: 4 }}>選擇班級</label>
               <select value={importClassName} onChange={e => setImportClassName(e.target.value)}
                 style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #ddd', fontSize: 14, width: '100%' }}>
@@ -293,23 +294,78 @@ export default function StaffPage() {
               </select>
             </div>
 
+            {/* Excel 上傳 */}
+            <div style={{ marginBottom: 16, padding: 20, border: '2px dashed #ddd', borderRadius: 12, textAlign: 'center', background: 'white' }}>
+              <div style={{ fontSize: 28, marginBottom: 8 }}>📄</div>
+              <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>上傳 Excel 檔案</div>
+              <div style={{ fontSize: 12, color: '#888', marginBottom: 12 }}>
+                支援 .xlsx / .xls，欄位需包含「LINE 名稱」（必填），「真實姓名」「自介」選填
+              </div>
+              <input
+                type="file"
+                accept=".xlsx,.xls,.csv"
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  try {
+                    const data = await file.arrayBuffer();
+                    const wb = XLSX.read(data);
+                    const ws = wb.Sheets[wb.SheetNames[0]];
+                    const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+
+                    if (rows.length === 0) return alert('Excel 裡沒有資料');
+
+                    // 自動偵測欄位名稱（支援多種命名）
+                    const cols = Object.keys(rows[0]);
+                    const findCol = (keywords) => cols.find(c => keywords.some(k => c.toLowerCase().includes(k)));
+                    const lineCol = findCol(['line', '名稱', 'line名', '帳號', '暱稱', 'display']);
+                    const nameCol = findCol(['真實', '姓名', '本名', 'name', '名字']);
+                    const introCol = findCol(['自介', '介紹', 'intro', '自我']);
+                    const idCol = findCol(['學號', 'id', '編號', 'student']);
+
+                    if (!lineCol) {
+                      alert(`找不到「LINE 名稱」欄位。\n偵測到的欄位：${cols.join(', ')}\n\n請確認 Excel 裡有包含 LINE 名稱的欄位`);
+                      return;
+                    }
+
+                    // 轉成預覽文字
+                    const preview = rows.map(r => {
+                      const parts = [r[lineCol]];
+                      if (nameCol && r[nameCol]) parts.push(r[nameCol]);
+                      if (introCol && r[introCol]) parts.push(r[introCol]);
+                      return parts.join(' | ');
+                    }).join('\n');
+
+                    setImportText(preview);
+                    alert(`成功讀取 ${rows.length} 筆資料，請確認後點「上傳名單」`);
+                  } catch (err) {
+                    alert('讀取 Excel 失敗：' + err.message);
+                  }
+                  e.target.value = ''; // reset input
+                }}
+                style={{ fontSize: 14 }}
+              />
+            </div>
+
+            {/* 或文字貼上 */}
             <div style={{ marginBottom: 12 }}>
               <label style={{ fontSize: 13, color: '#666', display: 'block', marginBottom: 4 }}>
-                學員名單（每行一位，格式：LINE 名稱 | 真實姓名 | 自介）
+                或直接貼上（每行一位：LINE 名稱 | 真實姓名 | 自介）
               </label>
               <textarea
                 value={importText}
                 onChange={e => setImportText(e.target.value)}
-                placeholder={'例：\nElaine Yeh | 宜萍 | 金融業，第二期學員\nAnnie | Annie | 12月班班長'}
+                placeholder={'Elaine Yeh | 宜萍 | 金融業，第二期學員\nAnnie | Annie | 12月班班長'}
                 rows={8}
                 style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid #ddd', fontSize: 14, fontFamily: 'monospace', resize: 'vertical' }}
               />
             </div>
 
-            <div style={{ fontSize: 12, color: '#999', marginBottom: 12 }}>
-              格式說明：LINE 名稱（必填）| 真實姓名（選填）| 自我介紹（選填）<br/>
-              用 | 分隔，自介如果太長可以之後在後台補
-            </div>
+            {importText && (
+              <div style={{ fontSize: 13, color: '#666', marginBottom: 12, padding: 8, background: '#E8F5E9', borderRadius: 8 }}>
+                預覽：{importText.trim().split('\n').length} 位學員
+              </div>
+            )}
 
             <button onClick={handleImport} style={{ padding: '10px 24px', borderRadius: 8, border: 'none', background: '#E8734A', color: 'white', cursor: 'pointer', fontWeight: 600, fontSize: 14 }}>
               上傳名單
