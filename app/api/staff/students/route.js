@@ -90,14 +90,29 @@ export async function GET(request) {
     const lastInteraction = lastConv.data?.[0]?.created_at || null;
     const totalInteractions = convCount.count || 0;
 
-    // 計算週數
+    // 計算週數（扣除停課天數）
     let currentWeek = null;
+    let isPaused = false;
     const classInfo = classMap[user.class_name];
     if (classInfo?.startDate) {
       const now = new Date();
       const start = new Date(classInfo.startDate);
       const diffDays = Math.floor((now - start) / (1000 * 60 * 60 * 24));
-      currentWeek = diffDays >= 0 ? Math.floor(diffDays / 7) + 1 : 0;
+
+      let pauseDays = 0;
+      if (classInfo.pauseStart && classInfo.pauseEnd) {
+        const ps = new Date(classInfo.pauseStart);
+        const pe = new Date(classInfo.pauseEnd);
+        isPaused = now >= ps && now <= pe;
+        if (now > pe) {
+          pauseDays = Math.floor((pe - ps) / (1000 * 60 * 60 * 24)) + 1;
+        } else if (now >= ps) {
+          pauseDays = Math.floor((now - ps) / (1000 * 60 * 60 * 24));
+        }
+      }
+
+      const effectiveDays = Math.max(0, diffDays - pauseDays);
+      currentWeek = diffDays >= 0 ? Math.floor(effectiveDays / 7) + 1 : 0;
     }
 
     // 判斷狀態
