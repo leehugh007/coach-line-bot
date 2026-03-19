@@ -44,14 +44,12 @@ export async function POST(request) {
 
     for (let i = 0; i < students.length; i++) {
       const s = students[i];
-      if (!s.lineName || !s.intro) {
-        errors.push({ index: i, reason: 'lineName and intro are required', data: s });
+      if (!s.lineName) {
+        errors.push({ index: i, reason: 'lineName is required', data: s });
         continue;
       }
-      if (s.intro.length < 10) {
-        errors.push({ index: i, reason: 'intro too short (min 10 chars)', data: s });
-        continue;
-      }
+      // intro 改為選填（報名表裡沒有自介，開課後才有）
+      if (!s.intro) s.intro = '';
       valid.push(s);
     }
 
