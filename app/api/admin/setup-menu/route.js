@@ -100,11 +100,18 @@ export async function POST(request) {
     const { richMenuId } = await createRichMenu(MENU_CONFIG);
     console.log(`[Menu] Created: ${richMenuId}`);
 
-    // 3. 產生並上傳圖片
-    const imageBuffer = await generateMenuImage();
-    console.log(`[Menu] Image generated: ${imageBuffer.length} bytes`);
-    await uploadRichMenuImage(richMenuId, imageBuffer);
-    console.log(`[Menu] Image uploaded`);
+    // 3. 產生並上傳圖片（skipImage=1 時跳過，等 PUT 上傳自訂圖片）
+    const url = new URL(request.url);
+    const skipImage = url.searchParams.get('skipImage') === '1';
+
+    if (!skipImage) {
+      const imageBuffer = await generateMenuImage();
+      console.log(`[Menu] Image generated: ${imageBuffer.length} bytes`);
+      await uploadRichMenuImage(richMenuId, imageBuffer);
+      console.log(`[Menu] Image uploaded`);
+    } else {
+      console.log(`[Menu] Skipping image (waiting for PUT upload)`);
+    }
 
     // 4. 設為預設
     await setDefaultRichMenu(richMenuId);
@@ -113,7 +120,7 @@ export async function POST(request) {
     return NextResponse.json({
       ok: true,
       richMenuId,
-      imageSize: imageBuffer.length,
+      imageUploaded: !skipImage,
       buttons: MENU_CONFIG.areas.map(a => a.action.label),
     });
   } catch (err) {
