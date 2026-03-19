@@ -39,9 +39,9 @@ export async function GET(request) {
   if (!sb) return NextResponse.json({ error: 'Supabase not configured' }, { status: 500 });
 
   try {
-    // 1. 取得所有有 class_name 的用戶
+    // 1. 取得所有有 class_name 的用戶（含群組活動時間）
     const { data: users } = await sb.from('users')
-      .select('id, display_name, class_name, updated_at')
+      .select('id, display_name, class_name, updated_at, last_group_activity')
       .not('class_name', 'is', null);
 
     if (!users || users.length === 0) {
@@ -85,8 +85,15 @@ export async function GET(request) {
         ? Math.floor((now - new Date(lastInteraction)) / (1000 * 60 * 60 * 24))
         : 999;
 
-      // 活躍的人不打擾（3天內有互動）
-      if (daysSinceLastInteraction <= 2) continue;
+      // 也檢查群組活動時間
+      const lastGroupActivity = user.last_group_activity;
+      const daysSinceGroupActivity = lastGroupActivity
+        ? Math.floor((now - new Date(lastGroupActivity)) / (1000 * 60 * 60 * 24))
+        : 999;
+
+      // 任何一邊活躍就不打擾（群組有發言 OR 小幫手有互動）
+      const daysSilent = Math.min(daysSinceLastInteraction, daysSinceGroupActivity);
+      if (daysSilent <= 2) continue; // 3天內任何活動 = 不推
 
       // 4. 查上次推播時間（避免連續推）
       const lastPush = await r.get(`${PUSH_LOG_PREFIX}${userId}`);
@@ -104,14 +111,14 @@ export async function GET(request) {
       // 6. 根據狀態決定推播內容
       let message = '';
 
-      if (daysSinceLastInteraction >= 7) {
+      if (daysSilent >= 7) {
         // 7天以上沒來：用成果拉回來
         if (totalInteractions > 10) {
           message = `${name}，你之前跟我聊了${totalInteractions}次，每一次都是你在為自己做的選擇。最近有遇到什麼新的狀況嗎？不管什麼都可以跟我聊 😊`;
         } else {
           message = `${name}，最近還好嗎？如果外食不知道怎麼選，按下面選單的「下一餐吃什麼」，跟我說你在哪吃，我幫你想搭配 😊`;
         }
-      } else if (daysSinceLastInteraction >= 3) {
+      } else if (daysSilent >= 3) {
         // 3-7天沒來：用有趣的內容鉤子
         const hooks = [
           `${name}，你知道嗎？很多人以為玉米是蔬菜，其實它是澱粉！類似的隱藏分類還有不少。要不要考考自己？按「這個能吃嗎」試試看 😄`,
@@ -129,8 +136,8 @@ export async function GET(request) {
         await pushMessage(userId, message);
         await r.set(`${PUSH_LOG_PREFIX}${userId}`, now.toISOString(), { ex: 86400 * 7 }); // 7天後過期
         pushed++;
-        log.push({ name, days: daysSinceLastInteraction, interactions: totalInteractions || 0 });
-        console.log(`[SmartPush] Pushed to ${name} (${daysSinceLastInteraction}d silent, ${totalInteractions || 0} interactions)`);
+        log.push({ name, daysSilent, dmDays: daysSinceLastInteraction, groupDays: daysSinceGroupActivity, interactions: totalInteractions || 0 });
+        console.log(`[SmartPush] Pushed to ${name} (${daysSilent}d silent: dm=${daysSinceLastInteraction}d, group=${daysSinceGroupActivity}d, ${totalInteractions || 0} interactions)`);
       } catch (err) {
         console.error(`[SmartPush] Failed for ${userId}:`, err.message);
       }

@@ -151,6 +151,15 @@ async function handleGroupMessage(source, userId, text) {
   // 1. 每則訊息都存入群組 buffer（不管是不是問題，都是上下文）
   await addGroupMessage(groupId, userId, displayName, trimmed);
 
+  // 1.5 記錄學員最後群組活動時間（用於智慧推播判斷）
+  try {
+    const { getSupabase } = await import('@/lib/supabase');
+    const sb = getSupabase();
+    if (sb) {
+      await sb.from('users').update({ last_group_activity: new Date().toISOString() }).eq('id', userId);
+    }
+  } catch (e) { /* 不阻塞主流程 */ }
+
   // 2. 偵測自我介紹（存入用戶資料，但不 return，繼續走 AI 偵測產生草稿）
   let isGroupIntro = false;
   if (looksLikeIntroduction(trimmed)) {
