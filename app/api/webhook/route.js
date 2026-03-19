@@ -10,7 +10,7 @@
  * 4. 非文字訊息 → 友善提示（僅私訊）
  */
 
-import { verifySignature, sendMessage, replyWithQuickReply, getProfile, getGroupMemberProfile, getGroupSummary } from '@/lib/line';
+import { verifySignature, sendMessage, pushMessage, replyWithQuickReply, getProfile, getGroupMemberProfile, getGroupSummary } from '@/lib/line';
 import { handleMessage, basicMessageFilter, aiDetectQuestion, generateDraftResponse } from '@/lib/ai';
 import { getChatHistory, addChatMessage, formatChatForGemini, addGroupMessage, getGroupContext } from '@/lib/chat';
 import { classifyIntent } from '@/lib/knowledge';
@@ -113,7 +113,7 @@ async function processEvent(event) {
     // ===== 群組訊息：只偵測自介，不回覆 =====
     if (sourceType === 'group' || sourceType === 'room') {
       if (message.type === 'text') {
-        return await handleGroupMessage(source, userId, message.text);
+        return await handleGroupMessage(source, userId, message.text, message.mention);
       }
       return; // 群組中非文字訊息忽略
     }
@@ -135,7 +135,7 @@ async function processEvent(event) {
 
 // ===== 群組訊息處理：靜默偵測自介 =====
 
-async function handleGroupMessage(source, userId, text) {
+async function handleGroupMessage(source, userId, text, mention) {
   const trimmed = text.trim();
   const groupId = source.groupId || source.roomId;
 
@@ -159,6 +159,50 @@ async function handleGroupMessage(source, userId, text) {
       await sb.from('users').update({ last_group_activity: new Date().toISOString() }).eq('id', userId);
     }
   } catch (e) { /* 不阻塞主流程 */ }
+
+  // 1.7 偵測班長點名 → 自動推播關心訊息給被點名的人
+  const rollCallKeywords = ['點名', '沒上傳', '沒有上傳', '還沒上傳', '未上傳', '沒傳', '還沒傳'];
+  const isRollCall = rollCallKeywords.some(kw => trimmed.includes(kw));
+  const mentionees = mention?.mentionees?.filter(m => m.userId) || [];
+
+  if (isRollCall && mentionees.length > 0) {
+    console.log(`[RollCall] Detected! ${displayName} tagged ${mentionees.length} students`);
+
+    // 背景推播（不阻塞群組訊息處理）
+    const rollCallPush = async () => {
+      const careMessages = [
+        (name) => `${name}，最近還好嗎？如果外食不知道怎麼選，按下面選單的「下一餐吃什麼」，跟我說你在哪吃，我幫你想搭配 😊`,
+        (name) => `${name}，最近有遇到什麼困難嗎？不管是飲食上的還是心態上的，都可以跟我聊。我們一起想辦法 ☺️`,
+        (name) => `${name}，我整理了一些外食搭配的小撇步，你想看看嗎？按下面選單就能用 😊\n\n有任何問題也可以直接問我！`,
+      ];
+
+      for (const m of mentionees) {
+        try {
+          // 不推播給班長/助教/教練自己
+          if (m.userId === userId || m.userId === process.env.COACH_USER_ID) continue;
+
+          const msgFn = careMessages[Math.floor(Math.random() * careMessages.length)];
+          // 嘗試取得學員名字
+          let studentName = '同學';
+          try {
+            const profile = await getGroupMemberProfile(groupId, m.userId);
+            if (profile?.displayName) studentName = profile.displayName;
+          } catch (_) {}
+
+          await pushMessage(m.userId, msgFn(studentName));
+          console.log(`[RollCall] Pushed care message to ${studentName}`);
+        } catch (err) {
+          console.error(`[RollCall] Push failed for ${m.userId}:`, err.message);
+        }
+      }
+    };
+
+    if (globalThis.__nextWaitUntil) {
+      globalThis.__nextWaitUntil(rollCallPush());
+    } else {
+      rollCallPush().catch(err => console.error('[RollCall] Error:', err));
+    }
+  }
 
   // 2. 偵測自我介紹（存入用戶資料，但不 return，繼續走 AI 偵測產生草稿）
   let isGroupIntro = false;
