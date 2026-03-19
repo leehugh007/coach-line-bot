@@ -1,1 +1,8 @@
-{}
+{
+  "crons": [
+    {
+      "path": "/api/cron/smart-push",
+      "schedule": "0 7 * * *"
+    }
+  ]
+}
