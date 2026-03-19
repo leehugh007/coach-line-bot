@@ -354,6 +354,170 @@ const TIPS = [
   { num: 10, text: '保持好心情', detail: '只吃開心的飯，不吃壓力的飯' },
 ];
 
+// ===== 肚子餓了 =====
+const HUNGER_GUIDE = [
+  {
+    id: 'morning',
+    time: '上午餓',
+    emoji: '☀️',
+    reason: '可能早餐蛋白質不夠、或吃太少',
+    snacks: ['茶葉蛋', '無糖豆漿', '堅果一小包', '水果一拳頭'],
+    tip: '檢查早餐有沒有吃到一手掌蛋白質，蛋白質夠了通常不會上午就餓',
+  },
+  {
+    id: 'afternoon',
+    time: '下午餓',
+    emoji: '🌤️',
+    reason: '正常的！午餐到晚餐間隔長',
+    snacks: ['堅果一平匙', '水果一拳頭', '無糖希臘優格', '茶葉蛋', '無糖豆漿', '85%以上黑巧克力1-2片', '毛豆', '烘烤黑/黃豆'],
+    tip: '下午茶選蛋白質或好油脂比選碳水更耐餓',
+  },
+  {
+    id: 'night',
+    time: '睡前餓',
+    emoji: '🌙',
+    reason: '晚餐可能吃太少或吃太早',
+    snacks: ['先喝水等10分鐘', '200ml鮮奶', '200ml無糖豆漿'],
+    tip: '真的餓就吃，不要忍到隔天暴食。但不要喝太多水影響睡眠',
+  },
+  {
+    id: 'office',
+    time: '在公司',
+    emoji: '🏢',
+    reason: '可能是壓力餓或習慣餓',
+    snacks: ['堅果小包（放抽屜）', '水果（蘋果/芭樂最方便）', '無糖豆漿/鮮奶', '海苔'],
+    tip: '先問自己：是真的餓還是嘴巴想吃？喝杯水等10分鐘再決定',
+  },
+];
+
+const HUNGER_TYPES = [
+  { type: '吃太少的餓', solution: '正餐份量吃夠，菜3肉2飯1', emoji: '📉' },
+  { type: '蛋白質不夠的餓', solution: '每餐確保一手掌蛋白質', emoji: '🥩' },
+  { type: '營養素不夠的餓', solution: '六大類營養都要均衡', emoji: '🥗' },
+  { type: '習慣吃多的餓', solution: '先喝水等10分鐘，用替代不用忍', emoji: '🧠' },
+];
+
+// ===== 經期飲食 =====
+const PERIOD_GUIDE = [
+  {
+    id: 'pre',
+    phase: '經前嘴饞',
+    emoji: '😋',
+    desc: '荷爾蒙變化讓身體渴望碳水和甜食，不是你意志力不夠',
+    items: [
+      { food: '高純度巧克力（70%+）', note: '拇指指節大小=一份，解嘴饞' },
+      { food: '黑豆水', note: '補蛋白質+去水腫' },
+      { food: '香蕉牛奶/芝麻豆漿', note: '色胺酸+鈣質，舒緩不適' },
+      { food: '無糖希臘優格+莓果', note: '想吃冰的替代方案' },
+    ],
+  },
+  {
+    id: 'during',
+    phase: '經期中',
+    emoji: '🩸',
+    desc: '身體在休息和修復，配合它而不是對抗它',
+    items: [
+      { food: '紅肉（牛肉、豬肝）', note: '補鐵，經期流失需要補回來' },
+      { food: '深綠色蔬菜', note: '也是鐵的好來源' },
+      { food: '薑茶', note: '暖子宮、舒緩不適' },
+      { food: '藍莓', note: '花青素抗氧化' },
+    ],
+    tips: ['生冷食物暫停（生菜沙拉改溫沙拉或炒蔬菜）', '不舒服就休息，不要勉強運動', '可以做輕度運動（散步、伸展）'],
+  },
+  {
+    id: 'weight',
+    phase: '經期體重',
+    emoji: '⚖️',
+    desc: '上升1-2公斤是水腫不是胖',
+    items: [
+      { food: '多喝水', note: '幫助排水（聽起來矛盾但有效）' },
+      { food: '減少鈉攝取', note: '少吃太鹹的' },
+    ],
+    tips: ['經期結束後體重會自然消下去', '不要因為經期體重上升就沮喪或節食', '這是身體正常的生理反應'],
+  },
+  {
+    id: 'after',
+    phase: '經後恢復',
+    emoji: '✨',
+    desc: '身體回到正軌，可能是減脂的好時機',
+    items: [
+      { food: '正常ABC飲食', note: '回到菜肉飯順序' },
+      { food: '補充蛋白質', note: '修復期需要更多蛋白質' },
+    ],
+    tips: ['經後是很多人突然掉秤的時候', '持續做對的事，身體會給你回報'],
+  },
+];
+
+// ===== 飲品指南 =====
+const DRINK_CATEGORIES = [
+  {
+    id: 'recommend',
+    name: '推薦飲品',
+    emoji: '✅',
+    items: [
+      { name: '水', note: '每天至少2000cc，最好的選擇', tag: '首選' },
+      { name: '無糖茶', note: '紅茶綠茶烏龍茶都好', tag: '推薦' },
+      { name: '黑咖啡', note: '與正餐間隔至少1小時（影響鐵鈣吸收）', tag: '推薦' },
+      { name: '無糖豆漿', note: '是蛋白質！一休的排序：豆漿>牛奶>植物奶', tag: '推薦' },
+      { name: '氣泡水', note: '零熱量，滿足想喝刺激口感的需求', tag: '推薦' },
+      { name: '切片檸檬水', note: '增添風味的好選擇', tag: '推薦' },
+      { name: '無糖鮮奶茶', note: '要用鮮奶不是奶精', tag: '推薦' },
+    ],
+  },
+  {
+    id: 'classify',
+    name: '植物奶分類（超常搞混）',
+    emoji: '🥛',
+    items: [
+      { name: '鮮奶', note: '乳品類（蛋白質+鈣），一天1-2杯', tag: '乳品' },
+      { name: '無糖豆漿', note: '蛋白質！首選蛋白質飲品', tag: '蛋白質' },
+      { name: '燕麥奶', note: '是澱粉不是奶！通常還加油', tag: '澱粉' },
+      { name: '杏仁奶', note: '是油脂不是奶！蛋白質含量極低', tag: '油脂' },
+      { name: '椰奶', note: '是油脂不是乳製品', tag: '油脂' },
+      { name: '米漿', note: '糊化澱粉+含糖，不建議', tag: '澱粉' },
+    ],
+  },
+  {
+    id: 'handshake',
+    name: '手搖飲怎麼點',
+    emoji: '🧋',
+    items: [
+      { name: '無糖茶/無糖鮮奶茶', note: '可以喝', tag: '推薦' },
+      { name: '仙草凍/桂花凍', note: '加料OK的選擇', tag: '推薦' },
+      { name: '珍珠', note: '製作時就加很多糖，「無糖珍奶」其實還是有糖', tag: '注意' },
+      { name: '杏仁凍', note: '是澱粉類，跟珍珠一樣要注意', tag: '注意' },
+      { name: '濃縮果汁類', note: '手搖飲店很少用水果本人，都是濃縮果汁', tag: '注意' },
+      { name: '啵啵球/蒟蒻球', note: '查一下含糖量，很多有12g糖', tag: '注意' },
+    ],
+  },
+  {
+    id: 'avoid',
+    name: '要注意的',
+    emoji: '⚠️',
+    items: [
+      { name: '含糖飲料', note: '造成肥胖最大原因之一，高果糖糖漿直接變腹部脂肪', tag: '避開' },
+      { name: '果汁', note: '快速吸收糖分+無纖維，吃原型水果比較好', tag: '避開' },
+      { name: '蜂蜜水', note: '蜂蜜也是糖！用水果切片加水替代', tag: '避開' },
+      { name: '三合一咖啡', note: '精緻糖+奶精，先調整頻率一週最多兩次', tag: '注意' },
+      { name: '奶茶', note: '奶精是油脂不是奶', tag: '避開' },
+      { name: '拿鐵選中杯', note: '特大杯奶量約500ml太多，大杯或中杯剛好', tag: '注意' },
+    ],
+  },
+  {
+    id: 'alcohol',
+    name: '喝酒怎麼辦',
+    emoji: '🍷',
+    items: [
+      { name: '紅酒', note: '35-50ml，相對好的選擇', tag: '少量' },
+      { name: '清酒/白酒', note: '次選', tag: '少量' },
+      { name: '啤酒', note: '250cc以內', tag: '少量' },
+      { name: '一杯酒配一杯水', note: '避免宿醉', tag: '技巧' },
+      { name: '不要空腹喝', note: '先吃東西再喝', tag: '技巧' },
+      { name: '最多兩杯', note: '酒精1g=7大卡，身體優先代謝酒精暫停燃脂', tag: '注意' },
+    ],
+  },
+];
+
 // ===== 三日調整法 =====
 const THREE_DAY = [
   { day: '聚餐前一天', emoji: '📋', items: ['吃清淡一點', '多喝水', '正常執行 ABC'] },
@@ -378,6 +542,9 @@ export default function GuidePage() {
   const tabs = [
     { id: 'food', name: '食物分類', emoji: '🔍' },
     { id: 'eating', name: '外食攻略', emoji: '🍱' },
+    { id: 'hunger', name: '肚子餓了', emoji: '😋' },
+    { id: 'period', name: '經期飲食', emoji: '🌸' },
+    { id: 'drink', name: '喝什麼', emoji: '🥤' },
     { id: 'portion', name: '份量指南', emoji: '✋' },
     { id: 'tips', name: '聚餐錦囊', emoji: '🎯' },
   ];
@@ -390,22 +557,24 @@ export default function GuidePage() {
         <div style={{ fontSize: 13, opacity: 0.9, marginTop: 4 }}>休校長的課程精華，隨時查、隨時用</div>
       </div>
 
-      {/* Tabs */}
-      <div style={{ display: 'flex', background: 'white', borderBottom: '1px solid #eee9e5', position: 'sticky', top: 0, zIndex: 10 }}>
-        {tabs.map(tab => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            style={{
-              flex: 1, padding: '12px 4px', border: 'none', background: 'none', cursor: 'pointer',
-              fontSize: 13, fontWeight: activeTab === tab.id ? 700 : 400,
-              color: activeTab === tab.id ? '#E8734A' : '#888',
-              borderBottom: activeTab === tab.id ? '2px solid #E8734A' : '2px solid transparent',
-            }}
-          >
-            {tab.emoji} {tab.name}
-          </button>
-        ))}
+      {/* Tabs — horizontal scroll */}
+      <div style={{ background: 'white', borderBottom: '1px solid #eee9e5', position: 'sticky', top: 0, zIndex: 10, overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+        <div style={{ display: 'flex', minWidth: 'max-content' }}>
+          {tabs.map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              style={{
+                padding: '12px 16px', border: 'none', background: 'none', cursor: 'pointer',
+                fontSize: 13, fontWeight: activeTab === tab.id ? 700 : 400, whiteSpace: 'nowrap',
+                color: activeTab === tab.id ? '#E8734A' : '#888',
+                borderBottom: activeTab === tab.id ? '2px solid #E8734A' : '2px solid transparent',
+              }}
+            >
+              {tab.emoji} {tab.name}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div style={{ padding: '16px' }}>
@@ -495,6 +664,119 @@ export default function GuidePage() {
                     )}
                   </div>
                 )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* ===== 肚子餓了 ===== */}
+        {activeTab === 'hunger' && (
+          <div>
+            <div style={{ background: '#FFF8E1', borderRadius: 12, padding: 16, marginBottom: 16 }}>
+              <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 8 }}>一休說：餓有四種</div>
+              {HUNGER_TYPES.map((h, i) => (
+                <div key={i} style={{ display: 'flex', gap: 8, padding: '6px 0', fontSize: 14 }}>
+                  <span>{h.emoji}</span>
+                  <div><strong>{h.type}</strong> → {h.solution}</div>
+                </div>
+              ))}
+            </div>
+
+            {HUNGER_GUIDE.map(h => (
+              <div key={h.id} style={{ background: 'white', borderRadius: 12, padding: 16, marginBottom: 10, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
+                <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 4 }}>{h.emoji} {h.time}</div>
+                <div style={{ fontSize: 13, color: '#888', marginBottom: 10 }}>{h.reason}</div>
+                <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>可以吃：</div>
+                {h.snacks.map((s, i) => (
+                  <div key={i} style={{ fontSize: 14, color: '#444', padding: '3px 0' }}>✅ {s}</div>
+                ))}
+                <div style={{ marginTop: 10, padding: '10px 12px', background: '#f5f0eb', borderRadius: 8, fontSize: 13, color: '#666' }}>
+                  💡 {h.tip}
+                </div>
+              </div>
+            ))}
+
+            <div style={{ marginTop: 16, padding: 16, background: 'white', borderRadius: 12, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
+              <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 8 }}>「有借有還」概念</div>
+              <div style={{ fontSize: 14, color: '#555', lineHeight: 1.8 }}>
+                吃了甜食 → 下一餐扣澱粉<br/>
+                吃了炸物 → 下一餐多蔬菜清淡<br/>
+                假日放飛 → 平日拉回<br/><br/>
+                <strong>不是懲罰，是平衡。</strong>不需要自責，我們來學習怎麼調整。
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ===== 經期飲食 ===== */}
+        {activeTab === 'period' && (
+          <div>
+            <div style={{ textAlign: 'center', fontSize: 14, color: '#888', marginBottom: 16 }}>
+              經期是身體在休息和修復，配合它而不是對抗它
+            </div>
+
+            {PERIOD_GUIDE.map(p => (
+              <div key={p.id} style={{ background: 'white', borderRadius: 12, padding: 16, marginBottom: 10, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
+                <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 2 }}>{p.emoji} {p.phase}</div>
+                <div style={{ fontSize: 13, color: '#888', marginBottom: 12 }}>{p.desc}</div>
+                {p.items.map((item, i) => (
+                  <div key={i} style={{ padding: '8px 0', borderTop: i === 0 ? '1px solid #f0ece8' : 'none' }}>
+                    <div style={{ fontWeight: 600, fontSize: 14, color: '#2a2520' }}>{item.food}</div>
+                    <div style={{ fontSize: 13, color: '#777' }}>{item.note}</div>
+                  </div>
+                ))}
+                {p.tips && (
+                  <div style={{ marginTop: 10, padding: '10px 12px', background: '#FCE4EC', borderRadius: 8 }}>
+                    {p.tips.map((tip, i) => (
+                      <div key={i} style={{ fontSize: 13, color: '#880E4F', padding: '2px 0' }}>💡 {tip}</div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* ===== 喝什麼 ===== */}
+        {activeTab === 'drink' && (
+          <div>
+            {DRINK_CATEGORIES.map(cat => (
+              <div key={cat.id} style={{ marginBottom: 16 }}>
+                <div style={{ fontWeight: 700, fontSize: 15, color: '#2a2520', marginBottom: 8 }}>
+                  {cat.emoji} {cat.name}
+                </div>
+                {cat.items.map((item, i) => {
+                  const tagColors = {
+                    '首選': { bg: '#E8F5E9', color: '#2E7D32' },
+                    '推薦': { bg: '#E8F5E9', color: '#2E7D32' },
+                    '乳品': { bg: '#E3F2FD', color: '#1565C0' },
+                    '蛋白質': { bg: '#E8F5E9', color: '#2E7D32' },
+                    '澱粉': { bg: '#FFF3E0', color: '#E65100' },
+                    '油脂': { bg: '#FFF3E0', color: '#E65100' },
+                    '注意': { bg: '#FBE9E7', color: '#BF360C' },
+                    '避開': { bg: '#FFEBEE', color: '#B71C1C' },
+                    '少量': { bg: '#FFF8E1', color: '#F57F17' },
+                    '技巧': { bg: '#E3F2FD', color: '#1565C0' },
+                  };
+                  const ts = tagColors[item.tag] || { bg: '#f0f0f0', color: '#666' };
+                  return (
+                    <div key={i} style={{
+                      background: 'white', borderRadius: 10, padding: '12px 14px', marginBottom: 6,
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.06)', display: 'flex', alignItems: 'flex-start', gap: 10,
+                    }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 600, fontSize: 15, color: '#2a2520' }}>{item.name}</div>
+                        <div style={{ fontSize: 13, color: '#777', marginTop: 2 }}>{item.note}</div>
+                      </div>
+                      <span style={{
+                        fontSize: 11, padding: '2px 8px', borderRadius: 10, whiteSpace: 'nowrap',
+                        background: ts.bg, color: ts.color, fontWeight: 600,
+                      }}>
+                        {item.tag}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             ))}
           </div>
