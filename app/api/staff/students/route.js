@@ -35,11 +35,32 @@ export async function GET(request) {
   if (!sb) return NextResponse.json({ error: 'Supabase not configured' }, { status: 500 });
 
   // 1. 取得所有有 class_name 的用戶
-  let query = sb.from('users').select('id, display_name, class_name, journey, updated_at, join_date');
+  // 取得進行中的班級名稱（用於默認篩選）
+  const activeClassNames = [];
+  const classNamesAll = [];
+  const allClassKeys = await r.smembers('coach-classes-index');
+  for (const cn of (allClassKeys || [])) {
+    const cd = await r.get(`${CLASS_PREFIX}${cn}`);
+    if (cd) {
+      const parsed = typeof cd === 'string' ? JSON.parse(cd) : cd;
+      classNamesAll.push(cn);
+      const start = new Date(parsed.startDate);
+      const end = parsed.endDate ? new Date(parsed.endDate) : null;
+      const now2 = new Date();
+      if (now2 >= start && (!end || now2 <= end)) activeClassNames.push(cn);
+    }
+  }
+
+  let query = sb.from('users').select('id, display_name, class_name, journey, updated_at, join_date, last_group_activity');
   if (classFilter) {
     query = query.eq('class_name', classFilter);
   } else {
-    query = query.not('class_name', 'is', null);
+    // 默認只顯示進行中班級的學員
+    if (activeClassNames.length > 0) {
+      query = query.in('class_name', activeClassNames);
+    } else {
+      query = query.not('class_name', 'is', null);
+    }
   }
 
   const { data: users, error } = await query;

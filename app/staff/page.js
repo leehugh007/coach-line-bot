@@ -200,8 +200,14 @@ export default function StaffPage() {
               onChange={e => setClassFilter(e.target.value)}
               style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #ddd', fontSize: 14 }}
             >
-              <option value="">全部班級</option>
-              {classes.map(c => <option key={c.name} value={c.name}>{c.name}{c.isActive ? ' (進行中)' : ''}</option>)}
+              <option value="">進行中的班級</option>
+              {classes.filter(c => c.isActive || c.isPaused).map(c => (
+                <option key={c.name} value={c.name}>{c.name}{c.isPaused ? ' (停課中)' : ''}</option>
+              ))}
+              {classes.some(c => !c.isActive && !c.isPaused) && <option disabled>── 已結業 ──</option>}
+              {classes.filter(c => !c.isActive && !c.isPaused).map(c => (
+                <option key={c.name} value={c.name} style={{ color: '#999' }}>{c.name} (已結業)</option>
+              ))}
             </select>
             <button onClick={loadStudents} style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid #ddd', background: 'white', cursor: 'pointer', fontSize: 14 }}>
               重新整理
@@ -287,17 +293,18 @@ export default function StaffPage() {
             <div style={{ textAlign: 'center', padding: 40, color: '#888' }}>尚未新增班級</div>
           ) : (
             <div>
-              {classes.map(c => (
+              {/* 進行中 */}
+              {classes.filter(c => c.isActive || c.isPaused).map(c => (
                 <div key={c.name} style={{
                   background: 'white', borderRadius: 12, padding: 16, marginBottom: 10,
-                  border: `1px solid ${c.isActive ? '#E8734A' : '#eee'}`,
+                  border: `1px solid ${c.isPaused ? '#F57F17' : '#E8734A'}`,
                   display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                 }}>
                   <div>
                     <div style={{ fontWeight: 700, fontSize: 16 }}>
                       {c.name}
                       {c.isPaused && <span style={{ fontSize: 12, color: '#F57F17', marginLeft: 8 }}>⏸ 停課中</span>}
-                    {c.isActive && !c.isPaused && <span style={{ fontSize: 12, color: '#E8734A', marginLeft: 8 }}>進行中 · 第{c.currentWeek}週</span>}
+                      {c.isActive && !c.isPaused && <span style={{ fontSize: 12, color: '#E8734A', marginLeft: 8 }}>進行中 · 第{c.currentWeek}週</span>}
                     </div>
                     <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>
                       {c.startDate} ~ {c.endDate || '未設定'} · {c.weeks}週
@@ -307,6 +314,23 @@ export default function StaffPage() {
                   <button onClick={() => deleteClass(c.name)} style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid #ddd', background: 'white', color: '#c00', cursor: 'pointer', fontSize: 12 }}>刪除</button>
                 </div>
               ))}
+              {/* 已結業（折疊） */}
+              {classes.some(c => !c.isActive && !c.isPaused) && (
+                <details style={{ marginTop: 16 }}>
+                  <summary style={{ fontSize: 14, color: '#999', cursor: 'pointer', padding: '8px 0' }}>
+                    已結業（{classes.filter(c => !c.isActive && !c.isPaused).length} 個）
+                  </summary>
+                  {classes.filter(c => !c.isActive && !c.isPaused).map(c => (
+                    <div key={c.name} style={{ background: '#fafafa', borderRadius: 10, padding: 12, marginBottom: 6, border: '1px solid #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'center', opacity: 0.6 }}>
+                      <div>
+                        <div style={{ fontSize: 14, color: '#888' }}>{c.name}</div>
+                        <div style={{ fontSize: 12, color: '#aaa' }}>{c.startDate} ~ {c.endDate}</div>
+                      </div>
+                      <button onClick={() => deleteClass(c.name)} style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid #eee', background: 'white', color: '#999', cursor: 'pointer', fontSize: 11 }}>刪除</button>
+                    </div>
+                  ))}
+                </details>
+              )}
             </div>
           )}
         </div>
