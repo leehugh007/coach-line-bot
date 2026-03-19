@@ -21,6 +21,8 @@ import {
   getUser, recordInteraction, buildUserContext,
   tryMatchPreloaded, isLinNameDuplicate, setPendingVerify,
   getPendingVerify, clearPendingVerify, tryMatchByRealName,
+  setPendingClassSelect, getPendingClassSelect, clearPendingClassSelect,
+  getActiveClassNames,
 } from '@/lib/user';
 import {
   extractCoachingTags, saveCoachingTags,
@@ -353,56 +355,38 @@ async function handleGroupMessage(source, userId, text, mention) {
 async function handleFollow(replyToken, userId) {
   console.log('[Follow] New user:', userId?.substring(0, 8));
 
-  let matched = false;
-  let needVerify = false;
+  // 取得目前進行中的班級
+  let activeClasses = [];
+  try {
+    activeClasses = await getActiveClassNames();
+  } catch (e) { console.error('[Follow] getActiveClasses error:', e); }
 
+  // 取得 LINE 顯示名稱
+  let displayName = '';
   try {
     const profile = await getProfile(userId);
-    if (profile?.displayName) {
-      // 先檢查是否有重名
-      const isDupe = await isLinNameDuplicate(profile.displayName);
-      if (isDupe) {
-        // 有重名：不自動比對，要求確認姓名
-        needVerify = true;
-        await setPendingVerify(userId, profile.displayName);
-        console.log(`[Follow] Duplicate LINE name: ${profile.displayName}, requesting verification`);
-      } else {
-        // 沒有重名：嘗試自動比對
-        matched = await tryMatchPreloaded(userId, profile.displayName);
-        if (matched) {
-          console.log(`[Follow] Auto-matched preloaded intro for ${profile.displayName}`);
-        } else {
-          // 沒比對到（可能不在名單裡，或名稱不一樣）→ 也要求確認
-          needVerify = true;
-          await setPendingVerify(userId, profile.displayName);
-          console.log(`[Follow] No match for ${profile.displayName}, requesting verification`);
-        }
-      }
-    }
-  } catch (err) {
-    console.error('[Follow] Match error:', err);
-  }
+    if (profile?.displayName) displayName = profile.displayName;
+  } catch (_) {}
 
-  let welcome;
-  if (needVerify) {
-    // 需要確認身份：先問姓名，再給正式歡迎
-    welcome = `嗨！我是休校長的小幫手 🙌
+  if (activeClasses.length > 0) {
+    // 有進行中的班級 → 先問是哪一班
+    await setPendingClassSelect(userId, displayName);
 
-歡迎加入！為了幫你建立專屬檔案，請先跟我說一下你報名時填的姓名 ☺️
+    const quickReply = activeClasses.map(c => ({ label: c, text: c }));
+    quickReply.push({ label: '我不是課程學員', text: '我不是課程學員' });
 
-（直接打名字就好，例如「王美玲」）`;
+    await replyWithQuickReply(
+      replyToken,
+      `嗨！我是休校長的小幫手 🙌\n\n歡迎加入！請先告訴我你是哪一班的：`,
+      quickReply,
+    );
+    console.log(`[Follow] Asking class selection for ${displayName || userId?.substring(0, 8)}`);
   } else {
-    // 已自動比對成功：正式歡迎
-    welcome = `嗨！我是休校長的小幫手 🙌
-
-不知道下一餐怎麼搭？跟我說你平常在哪裡買（便利商店？自助餐？早餐店？），我幫你想幾個 ABC 搭配，直接照著買就好 😊
-
-「這個能不能吃？」「玉米算澱粉嗎？」這種小問題也可以直接問我，秒回你。
-
-課程中有任何問題也隨時來聊——不好意思在群組問的、心態有點卡的，這裡什麼都可以聊。休校長也看得到喔 ☺️`;
+    // 沒有進行中的班 → 直接歡迎
+    await sendMessage(replyToken, userId,
+      `嗨！我是休校長的小幫手 🙌\n\n不知道下一餐怎麼搭？跟我說你平常在哪裡買（便利商店？自助餐？早餐店？），我幫你想幾個 ABC 搭配，直接照著買就好 😊\n\n「這個能不能吃？」「玉米算澱粉嗎？」這種小問題也可以直接問我，秒回你。\n\n課程中有任何問題也隨時來聊——不好意思在群組問的、心態有點卡的，這裡什麼都可以聊。休校長也看得到喔 ☺️`
+    );
   }
-
-  await sendMessage(replyToken, userId, welcome);
 }
 
 // ===== 私訊文字處理：buffer → 合併 → 處理 =====
@@ -459,24 +443,92 @@ async function bufferAndSchedule(replyToken, userId, text) {
     }
   }
 
-  // === 姓名確認：重名或未比對時，學員回覆姓名 ===
+  // === 班別選擇：加好友後選班 ===
+  const pendingClass = await getPendingClassSelect(userId);
+  if (pendingClass) {
+    const activeClasses = await getActiveClassNames();
+
+    if (activeClasses.includes(trimmed)) {
+      // 選了班 → 在該班名單中比對 LINE 名稱
+      await clearPendingClassSelect(userId);
+      const displayName = pendingClass.displayName;
+      console.log(`[ClassSelect] ${displayName} selected: ${trimmed}`);
+
+      const matched = await tryMatchPreloaded(userId, displayName, trimmed);
+      if (matched) {
+        console.log(`[ClassSelect] Auto-matched in ${trimmed}: ${displayName}`);
+        return await sendMessage(replyToken, userId,
+          `找到了！歡迎加入 ${trimmed} ☺️\n\n不知道下一餐怎麼搭？跟我說你平常在哪裡買（便利商店？自助餐？早餐店？），我幫你想幾個 ABC 搭配，直接照著買就好 😊\n\n「這個能不能吃？」「玉米算澱粉嗎？」這種小問題也可以直接問我。\n\n課程中有任何問題也隨時來聊，休校長也看得到喔 ☺️`
+        );
+      }
+
+      // 沒比對到 → 問姓名（帶班別資訊）
+      await setPendingVerify(userId, JSON.stringify({ displayName, selectedClass: trimmed }));
+      return await sendMessage(replyToken, userId,
+        `好的！請告訴我你報名時填的姓名，我幫你建立專屬檔案 ☺️\n\n（直接打名字就好，例如「王美玲」）`
+      );
+    } else if (trimmed === '我不是課程學員') {
+      await clearPendingClassSelect(userId);
+      console.log(`[ClassSelect] Not a student`);
+      return await sendMessage(replyToken, userId,
+        `沒問題！我是休校長的小幫手，有任何飲食或健康的問題都可以問我 ☺️\n\n不知道下一餐怎麼搭？跟我說你在哪吃，我幫你想搭配！`
+      );
+    }
+    // 回覆的不是班別選項 → 清除 pending，繼續正常流程
+    await clearPendingClassSelect(userId);
+  }
+
+  // === 姓名確認：選班後比對姓名 ===
   const pendingVerify = await getPendingVerify(userId);
   if (pendingVerify) {
+    // 解析 pending 資料（新格式帶班別，舊格式只有 displayName 字串）
+    let verifyData = {};
+    try {
+      verifyData = typeof pendingVerify === 'string' && pendingVerify.startsWith('{')
+        ? JSON.parse(pendingVerify) : { displayName: pendingVerify };
+    } catch (_) { verifyData = { displayName: pendingVerify }; }
+    const selectedClass = verifyData.selectedClass || null;
+
     // 學員正在回覆姓名（2-6個中文字，沒有其他複雜內容）
     const isLikelyName = /^[\u4e00-\u9fff]{2,6}$/.test(trimmed) || /^[a-zA-Z\s]{2,20}$/.test(trimmed);
     if (isLikelyName) {
-      const matched = await tryMatchByRealName(userId, trimmed);
+      const matched = await tryMatchByRealName(userId, trimmed, selectedClass);
       await clearPendingVerify(userId);
 
       if (matched) {
-        console.log(`[Verify] Matched by real name: ${trimmed}`);
+        console.log(`[Verify] Matched by real name: ${trimmed} (class: ${selectedClass})`);
         return await sendMessage(replyToken, userId,
           `找到了！歡迎你 ${trimmed} ☺️\n\n不知道下一餐怎麼搭？跟我說你平常在哪裡買（便利商店？自助餐？早餐店？），我幫你想幾個 ABC 搭配，直接照著買就好 😊\n\n「這個能不能吃？」「玉米算澱粉嗎？」這種小問題也可以直接問我。\n\n課程中有任何問題也隨時來聊，休校長也看得到喔 ☺️`
         );
       } else {
-        console.log(`[Verify] No match for real name: ${trimmed}`);
+        // 沒比對到 → 手動分班（存 class_name 到 Supabase）
+        if (selectedClass) {
+          try {
+            const { getSupabase } = await import('@/lib/supabase');
+            const sb = getSupabase();
+            if (sb) {
+              await sb.from('users').upsert({
+                id: userId, class_name: selectedClass,
+                display_name: trimmed,
+                updated_at: new Date().toISOString(),
+              }, { onConflict: 'id' });
+            }
+            // 也更新 Redis user
+            const user = await getUser(userId);
+            if (user) {
+              user.className = selectedClass;
+              if (!user.info) user.info = {};
+              if (!user.info.name) user.info.name = trimmed;
+              user.lineDisplayName = verifyData.displayName || trimmed;
+              const { saveUser } = await import('@/lib/user');
+              await saveUser(userId, user);
+            }
+          } catch (e) { console.error('[Verify] Class assign error:', e); }
+        }
+
+        console.log(`[Verify] No preload match for: ${trimmed}, assigned to ${selectedClass}`);
         return await sendMessage(replyToken, userId,
-          `沒關係！我先記住你了 ☺️\n\n不知道下一餐怎麼搭？跟我說你平常在哪裡買（便利商店？自助餐？早餐店？），我幫你想幾個 ABC 搭配，直接照著買就好 😊\n\n有任何問題隨時來聊！`
+          `歡迎你 ${trimmed} ☺️\n\n不知道下一餐怎麼搭？跟我說你平常在哪裡買（便利商店？自助餐？早餐店？），我幫你想幾個 ABC 搭配，直接照著買就好 😊\n\n有任何問題隨時來聊！`
         );
       }
     }
