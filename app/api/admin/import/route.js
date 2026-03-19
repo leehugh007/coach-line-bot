@@ -13,11 +13,13 @@ import { batchImportIntros, getPreloadedStatus } from '@/lib/user';
 import { NextResponse } from 'next/server';
 
 const ADMIN_KEY = process.env.ADMIN_API_KEY;
+const STAFF_KEY = process.env.STAFF_API_KEY;
 
 function checkAuth(request) {
-  if (!ADMIN_KEY) return false;
-  const key = request.headers.get('x-admin-key');
-  return key === ADMIN_KEY;
+  const key = request.headers.get('x-admin-key') || request.headers.get('x-staff-key');
+  if (ADMIN_KEY && key === ADMIN_KEY) return true;
+  if (STAFF_KEY && key === STAFF_KEY) return true;
+  return false;
 }
 
 // POST: 批次匯入
