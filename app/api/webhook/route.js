@@ -106,6 +106,24 @@ async function processEvent(event) {
       return await handleFollow(replyToken, userId);
     }
 
+    // 學員退出群組 → 清除班級（不再收課程推播，但仍可用小幫手基本功能）
+    if (type === 'memberLeft') {
+      const leftMembers = event.left?.members || [];
+      for (const member of leftMembers) {
+        if (member.userId) {
+          try {
+            const { getSupabase } = await import('@/lib/supabase');
+            const sb = getSupabase();
+            if (sb) {
+              await sb.from('users').update({ class_name: null }).eq('id', member.userId);
+            }
+            console.log(`[Left] ${member.userId?.substring(0, 8)} left group, class_name cleared`);
+          } catch (e) { console.error('[Left] Error:', e); }
+        }
+      }
+      return;
+    }
+
     if (type !== 'message') return;
 
     const { message } = event;
