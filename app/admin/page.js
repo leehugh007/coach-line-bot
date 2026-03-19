@@ -50,21 +50,12 @@ export default function AdminPage() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [showAllMessages, setShowAllMessages] = useState(false);
 
-  // 自動從 localStorage 恢復登入
+  // 自動從 localStorage 恢復登入（直接信任，不重新驗證）
   useEffect(() => {
     const saved = localStorage.getItem('coach-admin-key');
     if (saved) {
-      // 驗證 key 是否還有效
-      fetch('/api/admin/import', { headers: { 'x-admin-key': saved } })
-        .then(res => {
-          if (res.status !== 401) {
-            setAdminKey(saved);
-            setUnlocked(true);
-          } else {
-            localStorage.removeItem('coach-admin-key');
-          }
-        })
-        .catch(() => {});
+      setAdminKey(saved);
+      setUnlocked(true);
     }
   }, []);
 

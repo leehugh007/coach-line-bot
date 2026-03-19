@@ -26,20 +26,12 @@ export default function StudentsPage() {
   const [editingClass, setEditingClass] = useState(null);
   const [classInput, setClassInput] = useState('');
 
-  // 自動恢復登入
+  // 自動恢復登入（直接信任，不重新驗證）
   useEffect(() => {
     const saved = localStorage.getItem('coach-admin-key');
     if (saved) {
-      fetch('/api/admin/history', { headers: { 'x-admin-key': saved } })
-        .then(res => {
-          if (res.status !== 401) {
-            setAdminKey(saved);
-            setUnlocked(true);
-          } else {
-            localStorage.removeItem('coach-admin-key');
-          }
-        })
-        .catch(() => {});
+      setAdminKey(saved);
+      setUnlocked(true);
     }
   }, []);
 
