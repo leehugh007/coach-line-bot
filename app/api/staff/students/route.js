@@ -51,7 +51,7 @@ export async function GET(request) {
     }
   }
 
-  let query = sb.from('users').select('id, display_name, class_name, journey, updated_at, join_date, last_group_activity');
+  let query = sb.from('users').select('id, display_name, class_name, updated_at, join_date');
   if (classFilter) {
     query = query.eq('class_name', classFilter);
   } else {
