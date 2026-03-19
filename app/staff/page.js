@@ -30,6 +30,7 @@ export default function StaffPage() {
   const [importText, setImportText] = useState('');
   const [importClassName, setImportClassName] = useState('');
   const [importResult, setImportResult] = useState(null);
+  const [preloadedList, setPreloadedList] = useState(null);
 
   // Auth
   useEffect(() => {
@@ -75,12 +76,21 @@ export default function StaffPage() {
     setLoading(false);
   }, [staffKey, classFilter]);
 
+  const loadPreloaded = useCallback(async () => {
+    const res = await fetch('/api/admin/import', { headers: { ...headers, 'x-admin-key': staffKey } });
+    if (res.ok) {
+      const data = await res.json();
+      setPreloadedList(data.students || []);
+    }
+  }, [staffKey]);
+
   useEffect(() => {
     if (unlocked) {
       loadClasses();
       loadStudents();
+      loadPreloaded();
     }
-  }, [unlocked, loadClasses, loadStudents]);
+  }, [unlocked, loadClasses, loadStudents, loadPreloaded]);
 
   // Class CRUD
   const addClass = async () => {
@@ -449,6 +459,45 @@ export default function StaffPage() {
               </div>
             )}
           </div>
+
+          {/* 已匯入名單 */}
+          {preloadedList && preloadedList.length > 0 && (
+            <div style={{ marginTop: 20 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                <h3 style={{ margin: 0, fontSize: 16 }}>已匯入名單</h3>
+                <div style={{ fontSize: 13, color: '#888' }}>
+                  共 {preloadedList.length} 位
+                  · ✅ 已比對 {preloadedList.filter(s => s.matched).length}
+                  · ⏳ 未比對 {preloadedList.filter(s => !s.matched).length}
+                </div>
+              </div>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+                <thead>
+                  <tr style={{ background: '#f9f9f9', textAlign: 'left' }}>
+                    <th style={{ padding: '8px', borderBottom: '2px solid #eee' }}>LINE 名稱</th>
+                    <th style={{ padding: '8px', borderBottom: '2px solid #eee' }}>真實姓名</th>
+                    <th style={{ padding: '8px', borderBottom: '2px solid #eee' }}>班級</th>
+                    <th style={{ padding: '8px', borderBottom: '2px solid #eee' }}>比對狀態</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {preloadedList.map((s, i) => (
+                    <tr key={i} style={{ background: s.matched ? '#F1F8E9' : 'white' }}>
+                      <td style={{ padding: '8px', borderBottom: '1px solid #f0f0f0' }}>{s.lineName}</td>
+                      <td style={{ padding: '8px', borderBottom: '1px solid #f0f0f0', color: '#666' }}>{s.realName || '-'}</td>
+                      <td style={{ padding: '8px', borderBottom: '1px solid #f0f0f0', color: '#666' }}>{s.className || '-'}</td>
+                      <td style={{ padding: '8px', borderBottom: '1px solid #f0f0f0' }}>
+                        {s.matched
+                          ? <span style={{ color: '#2E7D32' }}>✅ 已比對</span>
+                          : <span style={{ color: '#F57F17' }}>⏳ 等待加好友</span>
+                        }
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
     </div>
