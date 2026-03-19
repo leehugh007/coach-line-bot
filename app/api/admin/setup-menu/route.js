@@ -122,6 +122,41 @@ export async function POST(request) {
   }
 }
 
+/**
+ * PUT — 上傳自訂選單圖片（替換 SVG 產生的版本）
+ * Body: 圖片 binary (JPG/PNG)
+ * Query: ?menuId=richmenu-xxx（可選，預設用最新的）
+ */
+export async function PUT(request) {
+  if (!checkAuth(request)) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  try {
+    const url = new URL(request.url);
+    let menuId = url.searchParams.get('menuId');
+
+    if (!menuId) {
+      const menus = await listRichMenus();
+      if (menus.length === 0) {
+        return NextResponse.json({ error: 'No rich menu found. POST first.' }, { status: 404 });
+      }
+      menuId = menus[0].richMenuId;
+    }
+
+    const imageBuffer = Buffer.from(await request.arrayBuffer());
+    const contentType = request.headers.get('content-type') || 'image/jpeg';
+
+    console.log(`[Menu] Uploading custom image: ${imageBuffer.length} bytes, type: ${contentType}`);
+    await uploadRichMenuImage(menuId, imageBuffer);
+
+    return NextResponse.json({ ok: true, menuId, imageSize: imageBuffer.length });
+  } catch (err) {
+    console.error('[Menu] Upload error:', err);
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  }
+}
+
 export async function DELETE(request) {
   if (!checkAuth(request)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
