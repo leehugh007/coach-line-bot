@@ -157,7 +157,11 @@ export async function PUT(request) {
     console.log(`[Menu] Uploading custom image: ${imageBuffer.length} bytes, type: ${contentType}`);
     await uploadRichMenuImage(menuId, imageBuffer);
 
-    return NextResponse.json({ ok: true, menuId, imageSize: imageBuffer.length });
+    // 上傳完自動設為預設
+    await setDefaultRichMenu(menuId);
+    console.log(`[Menu] Set as default: ${menuId}`);
+
+    return NextResponse.json({ ok: true, menuId, imageSize: imageBuffer.length, setAsDefault: true });
   } catch (err) {
     console.error('[Menu] Upload error:', err);
     return NextResponse.json({ error: err.message }, { status: 500 });
