@@ -7,6 +7,7 @@ const STATUS_MAP = {
   watch: { label: '🟡 待關注', color: '#F57F17', bg: '#FFF8E1' },
   care: { label: '🔴 需關心', color: '#C62828', bg: '#FFEBEE' },
   never: { label: '⚪ 未互動', color: '#666', bg: '#F5F5F5' },
+  not_joined: { label: '⏳ 未加好友', color: '#1565C0', bg: '#E3F2FD' },
   unknown: { label: '❓ 未知', color: '#999', bg: '#F5F5F5' },
 };
 
