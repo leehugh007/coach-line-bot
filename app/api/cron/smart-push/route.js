@@ -317,8 +317,14 @@ export async function GET(request) {
     return NextResponse.json({ ok: true, dryRun: true, type, total: preview.length, preview });
   }
 
+  // 可選：只推指定班級
+  const classOnly = url.searchParams.get('class');
+
   try {
-    const { users, classMap } = await loadStudentsAndClasses(sb, r);
+    let { users, classMap } = await loadStudentsAndClasses(sb, r);
+    if (classOnly) {
+      users = users.filter(u => u.class_name === classOnly);
+    }
     if (users.length === 0) {
       return NextResponse.json({ ok: true, message: 'No students found', pushed: 0 });
     }
