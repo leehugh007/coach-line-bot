@@ -573,7 +573,7 @@ async function bufferAndSchedule(replyToken, userId, text) {
     { food: '蓮藕', optA: '蔬菜', optB: '澱粉', correct: '澱粉', explain: '蓮藕吃起來脆脆的像蔬菜，但其實是澱粉類 😄' },
     { food: '山藥', optA: '蔬菜', optB: '澱粉', correct: '澱粉', explain: '山藥跟地瓜一樣是澱粉類，吃了就要減少飯量喔 😄' },
     { food: '芋頭', optA: '蔬菜', optB: '澱粉', correct: '澱粉', explain: '芋頭是澱粉！芋頭牛奶、芋圓都是澱粉+澱粉，要注意份量 😄' },
-    { food: '菱角', optA: '蔬菜', optB: '澱粉', correct: '澱粉', explain: '菱角吃起來像零食，但它其實是澱粉，3-4顆就等於一口飯 😄' },
+    { food: '菱角', optA: '蔬菜', optB: '澱粉', correct: '澱粉', explain: '菱角吃起來像零食，但它其實是澱粉，吃多了等於多吃飯 😄' },
     { food: '栗子', optA: '堅果', optB: '澱粉', correct: '澱粉', explain: '栗子雖然長得像堅果，但主要成分是澱粉，不是油脂 😄' },
     // --- 偽裝成蛋白質的澱粉 ---
     { food: '紅豆', optA: '蛋白質', optB: '澱粉', correct: '澱粉', explain: '紅豆、綠豆、花豆雖然叫「豆」，但主要成分是澱粉，紅豆湯=甜澱粉水 😄' },
@@ -596,7 +596,7 @@ async function bufferAndSchedule(replyToken, userId, text) {
     { food: '毛豆', optA: '蔬菜', optB: '蛋白質', correct: '蛋白質', explain: '毛豆是非常好的植物性蛋白質來源 💪' },
     { food: '豆皮', optA: '蛋白質', optB: '油脂', correct: '蛋白質', explain: '豆皮（生豆皮）是很好的蛋白質來源，但炸豆皮就變油脂了 😄' },
     { food: '蛋豆腐', optA: '蛋白質', optB: '油脂', correct: '蛋白質', explain: '蛋豆腐是蛋+豆漿做的，是好的蛋白質來源 😄（但日式炸蛋豆腐就不同了）' },
-    { food: '豆漿', optA: '蛋白質', optB: '澱粉', correct: '蛋白質', explain: '無糖豆漿是很好的蛋白質來源！但加了糖就變澱粉飲料了 😄' },
+    { food: '豆漿', optA: '蛋白質', optB: '澱粉', correct: '蛋白質', explain: '無糖豆漿是很好的蛋白質來源！記得選無糖的，加糖會讓胰島素飆升 😄' },
     // --- 容易搞混的飲品 ---
     { food: '米漿', optA: '蛋白質', optB: '澱粉', correct: '澱粉', explain: '米漿是米+花生做的，主要成分是澱粉+油脂，不是蛋白質 😄' },
     // --- 油脂偽裝成水果 ---
