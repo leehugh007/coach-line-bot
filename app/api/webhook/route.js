@@ -50,12 +50,10 @@ export async function POST(request) {
     return NextResponse.json({ ok: true });
   }
 
-  // Telegram 快速通知：在主流程（HTTP response 前）掃描群組訊息關鍵字
-  // 群組 AI 偵測仍在 waitUntil 背景做，但通知先用關鍵字發，確保送達
-  const tgToken = process.env.TELEGRAM_BOT_TOKEN;
-  const tgChat = process.env.TELEGRAM_CHAT_ID;
-  if (tgToken && tgChat) {
-    const mindsetWords = ['放棄','不想','算了','崩潰','撐不下去','做不到','好累','沒用','沒效','受不了','暴食','好想吃','管不住','復胖','不敢量','不想量'];
+  // LINE 快速通知：掃描群組訊息關鍵字 → 通知教練+助教
+  const mindsetWords = ['放棄','不想','算了','崩潰','撐不下去','做不到','好累','沒用','沒效','受不了','暴食','好想吃','管不住','復胖','不敢量','不想量'];
+  const notifyTargets = [process.env.COACH_USER_ID, process.env.STAFF_USER_ID].filter(Boolean);
+  if (notifyTargets.length > 0) {
     for (const event of events) {
       if (event.type === 'message' && event.message?.type === 'text' && event.source?.type === 'group') {
         const text = event.message.text || '';
@@ -72,14 +70,10 @@ export async function POST(request) {
               const gs = await getGroupSummary(event.source.groupId);
               if (gs?.groupName) groupName = `【${gs.groupName}】`;
             } catch (_) {}
-            await fetch(`https://api.telegram.org/bot${tgToken}/sendMessage`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                chat_id: tgChat,
-                text: `🔴${groupName} ${name} 可能需要關注\n\n「${text.substring(0, 200)}」\n\n→ 查看後台：https://coach-line-bot.vercel.app/admin`,
-              }),
-            });
+            const notifyText = `🔴 群組關注${groupName}\n${name} 說：「${text.substring(0, 150)}」\n\n→ 查看後台：https://coach-line-bot.vercel.app/admin`;
+            for (const id of notifyTargets) {
+              try { await pushMessage(id, notifyText); } catch (_) {}
+            }
           } catch (_) {}
         }
       }
@@ -731,6 +725,11 @@ async function processBatchedMessages(userId, messages) {
       console.error('[Tags] Background error:', err)
     );
 
+    // === 背景：私訊崩潰訊號偵測 → 通知教練 ===
+    detectDistressAndNotify(userId, combinedText, contextUser).catch(err =>
+      console.error('[Distress] Error:', err)
+    );
+
   } catch (err) {
     console.error('[MSG] AI error:', err);
     await sendMessage(lastReplyToken, userId,
@@ -762,6 +761,34 @@ async function backgroundTagProcessing(userId, userText, aiReply) {
   } catch (err) {
     console.error('[Tags] Background processing error:', err);
   }
+}
+
+// ===== 私訊崩潰訊號偵測 =====
+
+const DISTRESS_WORDS = ['放棄', '不想', '算了', '崩潰', '撐不下去', '做不到', '好累', '沒用', '沒效', '受不了', '暴食', '管不住', '復胖', '不敢量', '不想量', '想哭', '好難', '壓力好大', '不想繼續'];
+
+async function detectDistressAndNotify(userId, text, user) {
+  const matched = DISTRESS_WORDS.find(w => text.includes(w));
+  if (!matched) return;
+
+  const name = user?.info?.name || user?.lineDisplayName || '學員';
+  const className = user?.className || '';
+  const classLabel = className ? `【${className}】` : '';
+
+  const notifyText = `🔴 私訊關注${classLabel}\n${name} 說：「${text.substring(0, 150)}」\n\n關鍵字：${matched}\n→ 查看對話：https://coach-line-bot.vercel.app/admin/students`;
+
+  // LINE push 通知教練 + 助教（只推不存）
+  const targets = [process.env.COACH_USER_ID, process.env.STAFF_USER_ID].filter(Boolean);
+  for (const id of targets) {
+    if (id === userId) continue; // 不通知自己
+    try {
+      await pushMessage(id, notifyText);
+    } catch (e) {
+      console.error(`[Distress] Notify failed for ${id?.substring(0, 8)}:`, e.message);
+    }
+  }
+
+  console.log(`[Distress] ${name}: "${matched}" → notified ${targets.length} people`);
 }
 
 // ===== 選單觸發定義 =====
