@@ -1,8 +1,16 @@
 {
   "crons": [
     {
-      "path": "/api/cron/smart-push",
-      "schedule": "0 7 * * *"
+      "path": "/api/cron/smart-push?type=weekly",
+      "schedule": "0 0 * * 3"
+    },
+    {
+      "path": "/api/cron/smart-push?type=evening",
+      "schedule": "10 12 * * *"
+    },
+    {
+      "path": "/api/cron/smart-push?type=renewal-noon",
+      "schedule": "15 4 * * 4"
     }
   ]
 }

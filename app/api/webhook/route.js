@@ -443,6 +443,26 @@ async function bufferAndSchedule(replyToken, userId, text) {
     }
   }
 
+  // === 續報推播回覆：框定內容，不走 AI ===
+  const renewalReply = getRenewalQRResponse(trimmed);
+  if (renewalReply) {
+    console.log(`[Renewal] ${userId?.substring(0, 8)}: "${trimmed}"`);
+    await sendMessage(replyToken, userId, renewalReply.reply);
+
+    // 通知教練 + 助教（只推不存，不污染對話紀錄）
+    if (renewalReply.notifyCoach) {
+      let studentName = '同學';
+      try {
+        const u = await getUser(userId);
+        studentName = u?.info?.name || u?.lineDisplayName || '同學';
+      } catch (_) {}
+      notifyRenewalInterest(studentName, renewalReply.interest).catch(err =>
+        console.error('[Renewal] Notify error:', err)
+      );
+    }
+    return;
+  }
+
   // === 班別選擇：加好友後選班 ===
   const pendingClass = await getPendingClassSelect(userId);
   if (pendingClass) {
@@ -785,4 +805,68 @@ const MENU_TRIGGERS = {
  */
 function getMenuTrigger(text) {
   return MENU_TRIGGERS[text] || null;
+}
+
+// ===== 續報推播 Quick Reply 回覆（框定內容）=====
+
+const RENEWAL_QR_RESPONSES = {
+  // 第11週五：暖場
+  '想了解怎麼繼續': {
+    reply: `休校長有幫續報的同學爭取優惠方案，一個月平均不到 3000 元，名額會優先保留給你。\n\n而且續報的話，小幫手會繼續陪著你，更了解你的課程進度，幫你在過程中解決問題、陪你達成目標 ☺️\n\n有興趣的話直接到「Artemis線上減重班」官方帳號問助教，他會傳方案跟報名表給你！`,
+    notifyCoach: true,
+    interest: 'yes',
+  },
+  '我覺得可以自己來': {
+    reply: `很棒，代表你這三個月真的有內化 💪\n\n課程結束後小幫手還是可以用的，有問題隨時來問。\n\n不過說實話，在課程中小幫手會更了解你的進度跟狀態，能更針對性地陪你。一個人維持跟有團隊陪伴，遇到卡關的時候差別真的蠻大的。\n\n如果之後改變想法，到「Artemis線上減重班」官方帳號問助教就好 ☺️`,
+    notifyCoach: true,
+    interest: 'maybe',
+  },
+  '還在想': {
+    reply: `不急 ☺️ 你可以先想一件事：課程結束後，如果某天體重突然上升、或是連續幾天外食不知道怎麼選，你會怎麼做？\n\n有團隊的時候，這些都是小事。一個人的時候，就容易變成放棄的理由。\n\n想好了隨時到「Artemis線上減重班」官方帳號問助教，名額有幫你保留 ☺️`,
+    notifyCoach: true,
+    interest: 'thinking',
+  },
+  // 第12週四：最後提醒
+  '問助教續報方案': {
+    reply: `到「Artemis線上減重班」官方帳號，跟助教說「我想了解續報方案」就好，他會傳方案跟報名表給你 ☺️\n\n續報一個月平均不到 3000 元，小幫手也會繼續陪著你！`,
+    notifyCoach: true,
+    interest: 'yes',
+  },
+  '續報我再想想': {
+    reply: `好的 ☺️ 名額有保留著，想到的時候到「Artemis線上減重班」官方帳號問助教就好。`,
+    notifyCoach: true,
+    interest: 'thinking',
+  },
+  '我有其他問題想問': {
+    reply: `當然！你想問什麼都可以 ☺️`,
+    notifyCoach: false,
+    interest: null,
+  },
+};
+
+function getRenewalQRResponse(text) {
+  return RENEWAL_QR_RESPONSES[text] || null;
+}
+
+/**
+ * 通知教練 + 助教（LINE push，不存對話紀錄）
+ */
+async function notifyRenewalInterest(studentName, interest) {
+  const interestMap = {
+    yes: '想繼續 ✅',
+    maybe: '在考慮 🤔',
+    thinking: '還在想 💭',
+    no: '不需要了',
+  };
+
+  const text = `📋 續報意願\n${studentName}：${interestMap[interest] || interest}\n\n→ 查看學員：https://coach-line-bot.vercel.app/admin/students`;
+
+  const targets = [process.env.COACH_USER_ID, process.env.STAFF_USER_ID].filter(Boolean);
+  for (const id of targets) {
+    try {
+      await pushMessage(id, text);
+    } catch (e) {
+      console.error(`[Renewal] Notify failed for ${id?.substring(0, 8)}:`, e.message);
+    }
+  }
 }
