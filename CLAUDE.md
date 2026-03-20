@@ -1,7 +1,7 @@
 # 休校長小幫手 Bot — 專案上下文
 
 > 用途：讓 Claude Code 快速理解這個專案
-> 最後更新：2026-03-14
+> 最後更新：2026-03-20
 
 ## 專案定位
 
@@ -19,7 +19,7 @@
 - **框架**：Next.js 14（App Router）
 - **AI**：Gemini 3.1 Flash Lite（thinkingBudget: 1024）
 - **記憶**：Upstash Redis（快取層）+ Supabase（永久層，Read-through 回補）
-- **知識**：knowledge.js AI 意圖分類 + 兩層式注入（Tier1 精華 + Tier2 AI 選取 14 塊，regex 降級備案）
+- **知識**：knowledge.js AI 意圖分類 + 兩層式注入（Tier1 精華 + Tier2 AI 選取 21 塊，regex 降級備案）
 - **部署**：Vercel（push main = 自動部署）
 - **LINE**：Messaging API（Reply 優先，Push fallback）
 
@@ -51,23 +51,29 @@
 ```
 lib/
   ai.js          ← SYSTEM_PROMPT（瘦身後 ~3.2K 字）+ handleMessage() + aiDetectQuestion() + generateDraftResponse()
-  knowledge.js   ← AI 意圖分類（classifyIntent，輸出 tags+mood+slices）+ 兩層式知識注入（Tier1 精華 + Tier2 x14，regex 降級備案）
+  knowledge.js   ← AI 意圖分類（classifyIntent，輸出 tags+mood+slices）+ 兩層式知識注入（Tier1 精華 + Tier2 x17，regex 降級備案）
   chat.js        ← 對話記憶（私訊 24hr TTL, max 40）+ 群組 buffer（2hr TTL, max 20）
   line.js        ← LINE API（驗簽 + reply + push + profile + groupSummary）
-  user.js        ← 用戶資料管理 + 自介偵測 + 預載入比對
+  user.js        ← 用戶資料管理 + 自介偵測 + 預載入比對（含班別過濾）+ 班別選擇狀態管理
   tags.js        ← 教練標籤系統（topic/emotion/core_issue/conversation_style + 趨勢摘要 + 旅程摘要）
   supabase.js    ← Supabase client singleton
   pending.js     ← 群組問題待回應管理（Redis LIST, max 100）
 app/
-  admin/page.js            ← 管理後台（群組監控 + 主動關心 + 手動草稿 + 匯入）
-  admin/students/page.js   ← 學員管理（獨立頁面：列表 + 分班 + 搜尋 + 對話紀錄）
-  api/webhook/route.js     ← 主入口（maxDuration=60，含私訊訊息合併 8s buffer）
+  admin/page.js            ← 管理後台（群組監控 + 手動草稿 + 匯入）
+  admin/students/page.js   ← 學員管理（列表 + 快捷分班 + 搜尋 + 對話紀錄 + 標籤）
+  staff/page.js            ← 助教後台（學員狀態 + 主動關心 + 班級管理 + 名單上傳）
+  guide/page.js            ← 飲食指南網頁（7 個分類）
+  api/webhook/route.js     ← 主入口（maxDuration=60，含私訊合併 + 加好友先選班 + 班別比對）
   api/admin/pending/route.js   ← 待回應 API
   api/admin/import/route.js    ← 學員匯入 API
   api/admin/users/route.js     ← 學員列表 API
   api/admin/history/route.js   ← 學員對話紀錄 API（Supabase 讀取）
-  api/admin/outreach/route.js  ← 主動關心推播 API（pushMessage + 存 chatHistory）
+  api/admin/outreach/route.js  ← 主動關心推播 API（支援 admin + staff key）
   api/admin/students/route.js  ← 學員管理 API（更新 class_name）
+  api/admin/setup-menu/route.js ← Rich Menu 設定 API
+  api/staff/classes/route.js   ← 班級管理 API（CRUD + 停課區間）
+  api/staff/students/route.js  ← 學員狀態 API（含停課週數計算）
+  api/cron/smart-push/route.js ← 智慧推播 Cron（每天 15:00 台灣，沉默推播 + 課程進度）
 ```
 
 ## Redis 資料結構
@@ -82,6 +88,10 @@ coach:{userId}:milestones     → 里程碑（Set）
 coach:{userId}:summary        → AI 心態摘要
 coach:{userId}:journey        → 累積式旅程摘要（500-800 字）
 coach-pending:items           → 群組問題待回應（LIST, max 100）
+coach-pending-class:{userId}  → 等待選班的用戶（7天 TTL）
+coach-pending-verify:{userId} → 等待姓名確認（7天 TTL，含 selectedClass）
+coach-push-log:{userId}       → 智慧推播紀錄（7天 TTL）
+coach-week-push:{userId}      → 課程週數推播紀錄（60天 TTL）
 ```
 
 注意：Redis 實例與幫你算 Bot 共用，但 key prefix 不同（`coach-` vs `chat:`/`user:`）。

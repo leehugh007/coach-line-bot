@@ -34,7 +34,7 @@ import { NextResponse } from 'next/server';
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 export async function POST(request) {
   const body = await request.text();
@@ -565,22 +565,54 @@ async function bufferAndSchedule(replyToken, userId, text) {
     await clearPendingVerify(userId);
   }
 
+  // === 食物分類測驗題庫 ===
+  const FOOD_QUIZZES = [
+    { food: '南瓜', optA: '蔬菜', optB: '澱粉', correct: '澱粉', explain: '南瓜、玉米、蓮藕、山藥、芋頭都是澱粉，不是蔬菜 😄' },
+    { food: '玉米', optA: '蔬菜', optB: '澱粉', correct: '澱粉', explain: '很多人以為玉米是蔬菜，其實它跟飯一樣是澱粉類 😄' },
+    { food: '百頁豆腐', optA: '蛋白質', optB: '油脂', correct: '油脂', explain: '百頁豆腐在製程中加了很多油，熱量是嫩豆腐的 3 倍 😱' },
+    { food: '酪梨', optA: '水果', optB: '油脂', correct: '油脂', explain: '酪梨雖然是水果，但主要成分是好的油脂，算在油脂類 😄' },
+    { food: '蓮藕', optA: '蔬菜', optB: '澱粉', correct: '澱粉', explain: '蓮藕吃起來脆脆的像蔬菜，但其實是澱粉類 😄' },
+    { food: '毛豆', optA: '蔬菜', optB: '蛋白質', correct: '蛋白質', explain: '毛豆是非常好的植物性蛋白質來源 💪' },
+    { food: '蘿蔔', optA: '蔬菜', optB: '澱粉', correct: '蔬菜', explain: '白蘿蔔是蔬菜沒錯，但紅蘿蔔吃多了也要注意醣分 😄' },
+    { food: '豆皮', optA: '蛋白質', optB: '油脂', correct: '蛋白質', explain: '豆皮（生豆皮）是很好的蛋白質來源，但炸豆皮就變油脂了 😄' },
+    { food: '山藥', optA: '蔬菜', optB: '澱粉', correct: '澱粉', explain: '山藥跟地瓜一樣是澱粉類，吃了就要減少飯量喔 😄' },
+    { food: '玉米筍', optA: '蔬菜', optB: '澱粉', correct: '蔬菜', explain: '玉米筍跟玉米不一樣！玉米筍是蔬菜，可以放心吃 😄' },
+    { food: '花生', optA: '蛋白質', optB: '油脂', correct: '油脂', explain: '花生雖然叫「豆」但主要成分是油脂，一小把就好 😄' },
+    { food: '芋頭', optA: '蔬菜', optB: '澱粉', correct: '澱粉', explain: '芋頭是澱粉！芋頭牛奶、芋圓都是澱粉+澱粉，要注意份量 😄' },
+  ];
+
+  // === 食物分類答題：學員選了答案 ===
+  const quizAnswerMatch = trimmed.match(/^食物分類答：(.+)→(.+)$/);
+  if (quizAnswerMatch) {
+    const [, food, answer] = quizAnswerMatch;
+    const quiz = FOOD_QUIZZES.find(q => q.food === food);
+    if (quiz) {
+      const isCorrect = answer === quiz.correct;
+      const feedback = isCorrect
+        ? `答對了！🎉\n\n${quiz.food}是${quiz.correct}。${quiz.explain}`
+        : `不是喔！😄\n\n${quiz.food}不是${answer}，是${quiz.correct}。\n\n${quiz.explain}`;
+      return await replyWithQuickReply(replyToken, feedback, [
+        { label: '再來一題', text: '再考我一題食物分類' },
+        { label: '我有食物想問', text: '我想問其他食物能不能吃' },
+      ]);
+    }
+  }
+
+  // === 舊版「公布答案」相容（直接回覆不走 AI） ===
+  if (trimmed.startsWith('食物分類答案：')) {
+    return await replyWithQuickReply(replyToken, trimmed.replace('食物分類答案：', ''), [
+      { label: '再來一題', text: '再考我一題食物分類' },
+      { label: '我有食物想問', text: '我想問其他食物能不能吃' },
+    ]);
+  }
+
   // === 考考我：隨機食物分類測驗 ===
   if (trimmed === '考考我食物分類' || trimmed === '考考我' || trimmed === '再考我一題食物分類') {
-    const quizzes = [
-      { q: '南瓜是蔬菜還是澱粉？', a: '澱粉！南瓜、玉米、蓮藕、山藥、芋頭都是澱粉，不是蔬菜 😄' },
-      { q: '玉米是蔬菜還是澱粉？', a: '澱粉！很多人以為玉米是蔬菜，其實它跟飯一樣是澱粉類 😄' },
-      { q: '百頁豆腐是蛋白質還是油脂？', a: '油脂！百頁豆腐在製程中加了很多油，熱量是嫩豆腐的 3 倍 😱' },
-      { q: '酪梨是水果還是油脂？', a: '油脂！酪梨雖然是水果，但主要成分是好的油脂，算在油脂類 😄' },
-      { q: '蓮藕是蔬菜還是澱粉？', a: '澱粉！蓮藕吃起來脆脆的像蔬菜，但其實是澱粉類 😄' },
-      { q: '毛豆是蔬菜還是蛋白質？', a: '蛋白質！毛豆是非常好的植物性蛋白質來源 💪' },
-      { q: '蘿蔔是蔬菜還是澱粉？', a: '蔬菜！白蘿蔔是蔬菜沒錯，但紅蘿蔔吃多了也要注意醣分 😄' },
-      { q: '豆皮是蛋白質還是油脂？', a: '蛋白質！豆皮（生豆皮）是很好的蛋白質來源，但炸豆皮就變油脂了 😄' },
-    ];
-    const quiz = quizzes[Math.floor(Math.random() * quizzes.length)];
-    return await replyWithQuickReply(replyToken, `考考你 😄\n\n${quiz.q}`, [
-      { label: '公布答案', text: `食物分類答案：${quiz.a}` },
-      { label: '再來一題', text: '再考我一題食物分類' },
+    const quiz = FOOD_QUIZZES[Math.floor(Math.random() * FOOD_QUIZZES.length)];
+    return await replyWithQuickReply(replyToken, `考考你 😄\n\n${quiz.food}是${quiz.optA}還是${quiz.optB}？`, [
+      { label: quiz.optA, text: `食物分類答：${quiz.food}→${quiz.optA}` },
+      { label: quiz.optB, text: `食物分類答：${quiz.food}→${quiz.optB}` },
+      { label: '換一題', text: '再考我一題食物分類' },
       { label: '我有食物想問', text: '我想問其他食物能不能吃' },
     ]);
   }
@@ -592,6 +624,7 @@ async function bufferAndSchedule(replyToken, userId, text) {
       const sb = getSupabase();
       const user = await getUser(userId);
       const interactions = user?.stats?.totalInteractions || 0;
+      const userName = user?.parsed?.name || user?.lineDisplayName || '你';
 
       let progressText = '';
       if (sb) {
@@ -608,9 +641,9 @@ async function bufferAndSchedule(replyToken, userId, text) {
             const date = new Date(r.created_at).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' });
             return `✓ ${r.progress_detail}（${date}）`;
           }).join('\n');
-          progressText = `你跟我聊了 ${interactions} 次，以下是你提到的變化：\n\n${list}\n\n這些都是你一餐一餐累積出來的改變 ☺️`;
+          progressText = `${userName}，你已經跟我聊了 ${interactions} 次 ☺️\n\n你提到過的改變：\n\n${list}\n\n這些都是你一點一點累積出來的 💪`;
         } else {
-          progressText = `你目前跟我聊了 ${interactions} 次。\n\n持續跟我聊，我會幫你記錄身體的每一個變化 ☺️\n\n有什麼想問的嗎？`;
+          progressText = `${userName}，你已經跟我聊了 ${interactions} 次 ☺️\n\n持續跟我聊，我會幫你記錄身體和習慣上的每一個變化。等累積多了，你回來看會很有成就感的 💪`;
         }
       }
       return await sendMessage(replyToken, userId, progressText || '有什麼想聊的嗎？');
