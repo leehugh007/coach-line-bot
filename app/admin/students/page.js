@@ -30,6 +30,9 @@ export default function StudentsPage() {
   const [batchClassInput, setBatchClassInput] = useState('');
   const [batchLoading, setBatchLoading] = useState(false);
 
+  // 修復名字
+  const [fixingNames, setFixingNames] = useState(false);
+
   // 自動恢復登入（直接信任，不重新驗證）
   useEffect(() => {
     const saved = localStorage.getItem('coach-admin-key');
@@ -317,6 +320,21 @@ export default function StudentsPage() {
               style={{ padding: '10px 16px', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer', background: '#7B1FA2', color: 'white', whiteSpace: 'nowrap' }}>
               {loading ? '載入中...' : '重新載入'}
             </button>
+            {students.some(s => !s.display_name || s.id?.startsWith('U') && !s.display_name) && (
+              <button onClick={async () => {
+                setFixingNames(true);
+                try {
+                  const res = await fetch('/api/admin/users', { method: 'POST', headers: { 'x-admin-key': adminKey } });
+                  const data = await res.json();
+                  alert(`修復完成：${data.fixed}/${data.total} 位學員名字已更新`);
+                  loadStudents();
+                } catch (err) { alert('失敗：' + err.message); }
+                setFixingNames(false);
+              }} disabled={fixingNames}
+                style={{ padding: '10px 16px', border: '1px solid #ddd', borderRadius: 8, fontSize: 13, cursor: 'pointer', background: 'white', color: '#E65100', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                {fixingNames ? '修復中...' : '修復缺少的名字'}
+              </button>
+            )}
           </div>
 
           {/* 班別篩選 */}

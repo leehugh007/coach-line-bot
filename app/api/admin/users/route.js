@@ -33,6 +33,59 @@ async function fetchLineDisplayName(userId) {
   }
 }
 
+/**
+ * POST /api/admin/users — 批次修復缺少 display_name 的學員
+ * 從 LINE API fetch 真實名稱，更新 Supabase + Redis
+ */
+export async function POST(request) {
+  const key = request.headers.get('x-admin-key') || request.headers.get('x-staff-key');
+  if (key !== process.env.ADMIN_API_KEY && key !== process.env.STAFF_API_KEY) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  try {
+    const { getSupabase } = await import('@/lib/supabase');
+    const sb = getSupabase();
+    if (!sb) return NextResponse.json({ error: 'Supabase not configured' }, { status: 500 });
+
+    // 取得所有 display_name 為空的用戶
+    const { data: users } = await sb.from('users').select('id, display_name').or('display_name.is.null,display_name.eq.');
+    if (!users || users.length === 0) {
+      return NextResponse.json({ ok: true, message: 'No users need fixing', fixed: 0 });
+    }
+
+    let fixed = 0;
+    const log = [];
+    const r = getRedis();
+
+    for (const user of users) {
+      const name = await fetchLineDisplayName(user.id);
+      if (name) {
+        // 更新 Supabase
+        await sb.from('users').update({ display_name: name }).eq('id', user.id);
+
+        // 更新 Redis（如果有的話）
+        const cached = await r.get(`coach-user:${user.id}`);
+        if (cached) {
+          const profile = typeof cached === 'string' ? JSON.parse(cached) : cached;
+          profile.lineDisplayName = name;
+          if (profile.info && !profile.info.name) profile.info.name = name;
+          await r.set(`coach-user:${user.id}`, profile);
+        }
+
+        fixed++;
+        log.push({ id: user.id.substring(0, 8), name });
+      } else {
+        log.push({ id: user.id.substring(0, 8), name: null, reason: 'LINE API failed (可能已封鎖)' });
+      }
+    }
+
+    return NextResponse.json({ ok: true, total: users.length, fixed, log });
+  } catch (err) {
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  }
+}
+
 export async function GET(request) {
   const url = new URL(request.url);
   const key = url.searchParams.get('key');
