@@ -8,11 +8,35 @@
 
 import { pushMessage, pushWithQuickReply } from '@/lib/line';
 import { addChatMessage } from '@/lib/chat';
+import { Redis } from '@upstash/redis';
 import { NextResponse } from 'next/server';
+
+function getRedis() {
+  return new Redis({ url: process.env.KV_REST_API_URL, token: process.env.KV_REST_API_TOKEN });
+}
 
 function authCheck(request) {
   const key = request.headers.get('x-admin-key') || request.headers.get('x-staff-key');
   return key === process.env.ADMIN_API_KEY || key === process.env.STAFF_API_KEY;
+}
+
+/**
+ * GET /api/admin/outreach — 取得最近推播紀錄
+ */
+export async function GET(request) {
+  if (!authCheck(request)) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  try {
+    const r = getRedis();
+    const raw = await r.lrange('coach-push-history', 0, 99);
+    const logs = (raw || []).map(item => {
+      try { return typeof item === 'string' ? JSON.parse(item) : item; } catch { return null; }
+    }).filter(Boolean);
+    return NextResponse.json({ ok: true, logs });
+  } catch (err) {
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  }
 }
 
 export async function POST(request) {
@@ -49,6 +73,15 @@ export async function POST(request) {
 
       // 存入對話歷史，讓學員回覆時 AI 知道上下文
       await addChatMessage(user.id, 'assistant', personalizedMsg);
+
+      // 記錄推播歷史
+      try {
+        const r = getRedis();
+        const entry = JSON.stringify({ ts: new Date().toISOString(), name: user.name || '同學', type: '主動關心', preview: personalizedMsg.substring(0, 80) });
+        await r.lpush('coach-push-history', entry);
+        await r.ltrim('coach-push-history', 0, 99);
+      } catch (_) {}
+
       results.sent++;
     } catch (err) {
       results.failed++;

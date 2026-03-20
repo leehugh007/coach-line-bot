@@ -21,6 +21,7 @@ const CLASS_PREFIX = 'coach-class:';
 const PUSH_LOG_PREFIX = 'coach-push-log:';      // 通用推播紀錄（1天冷卻）
 const WEEK_LOG_PREFIX = 'coach-week-push:';      // 課程週數推播紀錄
 const RENEWAL_LOG_PREFIX = 'coach-renewal-push:'; // 續報推播紀錄
+const PUSH_HISTORY_KEY = 'coach-push-history';    // 推播紀錄（LIST, max 100）
 
 function getRedis() {
   return new Redis({
@@ -82,6 +83,19 @@ async function wasPushedToday(r, userId) {
 /** 記錄推播 */
 async function recordPush(r, userId) {
   await r.set(`${PUSH_LOG_PREFIX}${userId}`, new Date().toISOString(), { ex: 86400 * 2 });
+}
+
+/** 記錄推播歷史（供後台查看）*/
+async function logPushHistory(r, name, type, preview) {
+  const entry = JSON.stringify({
+    ts: new Date().toISOString(),
+    name,
+    type,
+    preview: (preview || '').substring(0, 80),
+  });
+  await r.lpush(PUSH_HISTORY_KEY, entry);
+  await r.ltrim(PUSH_HISTORY_KEY, 0, 99); // 保留最新 100 筆
+  await r.expire(PUSH_HISTORY_KEY, 86400 * 30); // 30 天過期
 }
 
 // ===================================================================
@@ -323,6 +337,7 @@ async function handleWeeklyPush(sb, r, users, classMap, now) {
 
       pushed++;
       log.push({ name, week: courseWeek, type: `week${courseWeek}` });
+      await logPushHistory(r, name, `課程第${courseWeek}週`, msg.text);
       console.log(`[Weekly] ${name}: week${courseWeek}`);
     } catch (err) {
       console.error(`[Weekly] Failed for ${name}:`, err.message);
@@ -369,6 +384,7 @@ async function handleEveningPush(sb, r, users, classMap, now) {
           await recordPush(r, userId);
           pushed++;
           log.push({ name, week: courseWeek, type: 'renewal-w11' });
+          await logPushHistory(r, name, '續報暖場', msg.text);
           console.log(`[Renewal] ${name}: week11 warm-up`);
         } catch (err) {
           console.error(`[Renewal] Failed for ${name}:`, err.message);
@@ -414,6 +430,7 @@ async function handleEveningPush(sb, r, users, classMap, now) {
       await recordPush(r, userId);
       pushed++;
       log.push({ name, week: courseWeek, type: daysSilent >= 7 ? 'silent-7d' : 'silent-2d', daysSilent });
+      await logPushHistory(r, name, `沉默${daysSilent}天`, message);
       console.log(`[Silent] ${name}: silent=${daysSilent}d (week${courseWeek})`);
     } catch (err) {
       console.error(`[Silent] Failed for ${name}:`, err.message);
@@ -463,6 +480,7 @@ async function handleRenewalNoonPush(sb, r, users, classMap, now) {
       await recordPush(r, userId);
       pushed++;
       log.push({ name, week: courseWeek, type: 'renewal-w12' });
+      await logPushHistory(r, name, '續報提醒', msg.text);
       console.log(`[Renewal] ${name}: week12 final reminder`);
     } catch (err) {
       console.error(`[Renewal] Failed for ${name}:`, err.message);

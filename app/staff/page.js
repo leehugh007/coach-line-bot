@@ -44,6 +44,7 @@ export default function StaffPage() {
   const [outreachUseQR, setOutreachUseQR] = useState(true);
   const [outreachSending, setOutreachSending] = useState(false);
   const [outreachResult, setOutreachResult] = useState(null);
+  const [pushLogs, setPushLogs] = useState(null);
 
   // Auth
   useEffect(() => {
@@ -434,6 +435,40 @@ export default function StaffPage() {
               </table>
             </>
           )}
+
+          {/* 推播紀錄（可收合） */}
+          <details style={{ marginTop: 20 }} onToggle={async (e) => {
+            if (e.target.open && !pushLogs) {
+              try {
+                const res = await fetch('/api/admin/outreach', { headers: { 'x-staff-key': staffKey } });
+                const data = await res.json();
+                if (data.ok) setPushLogs(data.logs || []);
+              } catch (_) {}
+            }
+          }}>
+            <summary style={{ fontSize: 14, color: '#888', cursor: 'pointer', padding: '8px 0' }}>
+              最近推播紀錄 {pushLogs ? `（${pushLogs.length} 筆）` : ''}
+            </summary>
+            {pushLogs && pushLogs.length > 0 ? (
+              <div style={{ maxHeight: 400, overflowY: 'auto', marginTop: 8 }}>
+                {pushLogs.map((log, i) => (
+                  <div key={i} style={{ padding: '8px 12px', borderBottom: '1px solid #f0f0f0', fontSize: 13 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+                      <span><strong>{log.name}</strong> · <span style={{ color: '#E8734A' }}>{log.type}</span></span>
+                      <span style={{ color: '#aaa', fontSize: 11 }}>{new Date(log.ts).toLocaleString('zh-TW')}</span>
+                    </div>
+                    <div style={{ color: '#666', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {log.preview}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : pushLogs ? (
+              <div style={{ padding: 20, textAlign: 'center', color: '#aaa', fontSize: 13 }}>尚無推播紀錄</div>
+            ) : (
+              <div style={{ padding: 20, textAlign: 'center', color: '#aaa', fontSize: 13 }}>載入中...</div>
+            )}
+          </details>
         </div>
       )}
 
