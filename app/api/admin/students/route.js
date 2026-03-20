@@ -9,8 +9,8 @@ import { getSupabase } from '@/lib/supabase';
 import { NextResponse } from 'next/server';
 
 function authCheck(request) {
-  const key = request.headers.get('x-admin-key');
-  return key === process.env.ADMIN_API_KEY;
+  const key = request.headers.get('x-admin-key') || request.headers.get('x-staff-key');
+  return key === process.env.ADMIN_API_KEY || key === process.env.STAFF_API_KEY;
 }
 
 export async function POST(request) {

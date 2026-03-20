@@ -27,6 +27,10 @@ export default function StaffPage() {
   const [newPauseStart, setNewPauseStart] = useState('');
   const [newPauseEnd, setNewPauseEnd] = useState('');
 
+  // 分班
+  const [editingClassId, setEditingClassId] = useState(null);
+  const [classInputValue, setClassInputValue] = useState('');
+
   // 名單上傳
   const [importText, setImportText] = useState('');
   const [importClassName, setImportClassName] = useState('');
@@ -178,6 +182,21 @@ export default function StaffPage() {
     );
   }
 
+  const updateStudentClass = async (userId, className) => {
+    try {
+      await fetch('/api/admin/students', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-staff-key': staffKey },
+        body: JSON.stringify({ userId, className }),
+      });
+      setStudents(prev => prev.map(s => s.userId === userId ? { ...s, className } : s));
+    } catch (err) { console.error('Update class error:', err); }
+    setEditingClassId(null);
+    setClassInputValue('');
+  };
+
+  const allClassNames = [...new Set(classes.map(c => c.name))];
+
   // 主動關心：可選的學員（有 userId + 狀態為 care/watch/never 的）
   const outreachCandidates = students.filter(s => s.userId && ['care', 'watch', 'never'].includes(s.status));
 
@@ -291,6 +310,7 @@ export default function StaffPage() {
                   <th style={{ padding: '10px 8px', borderBottom: '2px solid #eee' }}>互動</th>
                   <th style={{ padding: '10px 8px', borderBottom: '2px solid #eee' }}>最後互動</th>
                   <th style={{ padding: '10px 8px', borderBottom: '2px solid #eee' }}>狀態</th>
+                  <th style={{ padding: '10px 8px', borderBottom: '2px solid #eee' }}>分班</th>
                 </tr>
               </thead>
               <tbody>
@@ -307,6 +327,33 @@ export default function StaffPage() {
                       </td>
                       <td style={{ padding: '10px 8px', borderBottom: '1px solid #f0f0f0' }}>
                         <span style={{ padding: '2px 8px', borderRadius: 10, fontSize: 12, fontWeight: 600, background: st.bg, color: st.color }}>{st.label}</span>
+                      </td>
+                      <td style={{ padding: '10px 8px', borderBottom: '1px solid #f0f0f0' }}>
+                        {editingClassId === s.userId ? (
+                          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                            <input value={classInputValue} onChange={e => setClassInputValue(e.target.value)}
+                              placeholder="班別" autoFocus style={{ width: 80, padding: '3px 6px', borderRadius: 4, border: '1px solid #ddd', fontSize: 12 }}
+                              onKeyDown={e => { if (e.key === 'Enter') updateStudentClass(s.userId, classInputValue.trim()); }} />
+                            <button onClick={() => updateStudentClass(s.userId, classInputValue.trim())}
+                              style={{ padding: '2px 6px', border: 'none', borderRadius: 4, fontSize: 11, cursor: 'pointer', background: '#E8734A', color: 'white' }}>存</button>
+                            <button onClick={() => setEditingClassId(null)}
+                              style={{ padding: '2px 6px', border: '1px solid #ddd', borderRadius: 4, fontSize: 11, cursor: 'pointer', background: 'white', color: '#888' }}>✕</button>
+                          </div>
+                        ) : !s.className ? (
+                          <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
+                            {allClassNames.map(c => (
+                              <button key={c} onClick={() => updateStudentClass(s.userId, c)}
+                                style={{ padding: '2px 6px', border: '1px solid #E8734A', borderRadius: 4, fontSize: 10, cursor: 'pointer', background: 'white', color: '#E8734A', whiteSpace: 'nowrap' }}>
+                                {c}
+                              </button>
+                            ))}
+                            <button onClick={() => { setEditingClassId(s.userId); setClassInputValue(''); }}
+                              style={{ padding: '2px 5px', border: '1px solid #ddd', borderRadius: 4, fontSize: 10, cursor: 'pointer', background: 'white', color: '#aaa' }}>⋯</button>
+                          </div>
+                        ) : (
+                          <button onClick={() => { setEditingClassId(s.userId); setClassInputValue(s.className); }}
+                            style={{ padding: '2px 6px', border: '1px solid #ddd', borderRadius: 4, fontSize: 11, cursor: 'pointer', background: 'white', color: '#888' }}>改班</button>
+                        )}
                       </td>
                     </tr>
                   );
