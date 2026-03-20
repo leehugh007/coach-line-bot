@@ -138,11 +138,12 @@ function getWeeklyMessage(week, name) {
       ],
     },
     5: {
-      text: `${name}，很多同學跟我說第五週開始覺得「好像沒那麼容易了」。\n\n跟你說一個秘密：這不是退步，是你的身體在適應新的代謝模式。幾乎每個人都會經歷。\n\n休校長說：60-80 分就很棒了，不需要 100 分。`,
+      text: `${name}，很多同學跟我說第五週開始覺得「好像沒那麼容易了」。\n\n跟你說一個秘密：這不是退步，是你的身體在適應新的代謝模式。幾乎每個人都會經歷。\n\n休校長說：60-80 分就很棒了，不需要 100 分。\n\n不看體重的話，你有沒有注意到身體其他的變化？`,
       qr: [
-        { label: '最近確實有點卡', text: '最近飲食確實有點卡關' },
-        { label: '想知道怎麼突破', text: '停滯期要怎麼突破' },
-        { label: '目前還好', text: '目前飲食都還算順利' },
+        { label: '有，精神變好了', text: '最近精神確實有變好' },
+        { label: '衣服好像鬆了', text: '最近衣服有變鬆的感覺' },
+        { label: '最近有點卡', text: '最近飲食確實有點卡關' },
+        { label: '還沒什麼感覺', text: '五週了但還沒什麼感覺' },
       ],
     },
     6: {
@@ -393,7 +394,7 @@ async function handleEveningPush(sb, r, users, classMap, now) {
       }
     }
 
-    // === 沉默推播：2天+ 沒互動 ===
+    // === 沉默推播 or 進步回顧：2天+ 沒互動 ===
     if (courseWeek < 1 || courseWeek > 12) continue;
 
     // 查最後互動
@@ -417,7 +418,44 @@ async function handleEveningPush(sb, r, users, classMap, now) {
     const daysSilent = Math.min(daysSinceInteraction, daysSinceGroup);
     if (daysSilent < 2) continue; // 2天門檻
 
-    // 取得互動次數
+    // === 優先：進步回顧（有 3+ 筆進步紀錄且未回顧過）===
+    const progressReviewKey = `coach-progress-review:${userId}`;
+    const lastReviewCount = await r.get(progressReviewKey);
+    const { data: progressRecords } = await sb.from('coaching_tags')
+      .select('progress_detail, created_at')
+      .eq('user_id', userId)
+      .not('progress_detail', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(10);
+
+    const progressItems = (progressRecords || []).filter(p => p.progress_detail);
+    const newProgressCount = progressItems.length;
+    const lastCount = lastReviewCount ? parseInt(lastReviewCount) : 0;
+
+    if (newProgressCount >= 3 && newProgressCount > lastCount) {
+      // 有新的進步紀錄可回顧
+      const reviewItems = progressItems.slice(0, 5).map(p => {
+        const date = new Date(p.created_at).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' });
+        return `✓ ${p.progress_detail}（${date}）`;
+      }).join('\n');
+
+      const reviewMsg = `${name}，幫你整理一下你最近提到的變化：\n\n${reviewItems}\n\n這些都是你一餐一餐累積出來的改變。體重只是其中一個指標，但你的身體已經在告訴你：你做對了 ☺️`;
+
+      try {
+        await pushMessage(userId, reviewMsg);
+        await r.set(progressReviewKey, String(newProgressCount), { ex: 86400 * 60 });
+        await recordPush(r, userId);
+        pushed++;
+        log.push({ name, week: courseWeek, type: 'progress-review', items: newProgressCount });
+        await logPushHistory(r, name, `進步回顧(${newProgressCount}筆)`, reviewMsg);
+        console.log(`[Progress] ${name}: ${newProgressCount} items reviewed`);
+      } catch (err) {
+        console.error(`[Progress] Failed for ${name}:`, err.message);
+      }
+      continue; // 推了回顧就不推沉默
+    }
+
+    // === 一般沉默推播 ===
     const { count: totalInteractions } = await sb.from('conversations')
       .select('*', { count: 'exact', head: true })
       .eq('user_id', userId)
