@@ -371,7 +371,9 @@ async function handleWeeklyPush(sb, r, users, classMap, now) {
     if (!msg) continue;
 
     try {
-      await pushWithQuickReply(userId, msg.text, msg.qr);
+      // LINE Push API 不支援 Quick Reply，改用文字提示
+      const qrHint = msg.qr.map(q => `👉 ${q.label}`).join('\n');
+      await pushMessage(userId, `${msg.text}\n\n${qrHint}\n\n直接點上面的選項，或打字跟我聊都可以 😊`);
       await r.set(`${WEEK_LOG_PREFIX}${userId}`, String(courseWeek), { ex: 86400 * 60 });
       await recordPush(r, userId);
 
@@ -419,7 +421,8 @@ async function handleEveningPush(sb, r, users, classMap, now) {
       if (!alreadySent) {
         const msg = getRenewalWeek11Message(name);
         try {
-          await pushWithQuickReply(userId, msg.text, msg.qr);
+          const qrHint = msg.qr.map(q => `👉 ${q.label}`).join('\n');
+          await pushMessage(userId, `${msg.text}\n\n${qrHint}`);
           await r.set(renewalKey, now.toISOString(), { ex: 86400 * 30 });
           await recordPush(r, userId);
           pushed++;
@@ -552,7 +555,8 @@ async function handleRenewalNoonPush(sb, r, users, classMap, now) {
 
     const msg = getRenewalWeek12Message(name);
     try {
-      await pushWithQuickReply(userId, msg.text, msg.qr);
+      const qrHint = msg.qr.map(q => `👉 ${q.label}`).join('\n');
+      await pushMessage(userId, `${msg.text}\n\n${qrHint}`);
       await r.set(renewalKey, now.toISOString(), { ex: 86400 * 30 });
       await recordPush(r, userId);
       pushed++;
