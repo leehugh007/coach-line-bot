@@ -54,6 +54,7 @@ export async function GET(request) {
         progress_signal: parts[2] || 'neutral',
         conversation_style: parts[3] || 'asking',
         core_issue: row.core_issue || null,
+        progress_detail: row.progress_detail || null,
         date: row.created_at,
       };
     });

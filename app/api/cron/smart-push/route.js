@@ -271,10 +271,35 @@ export async function GET(request) {
   }
 
   const type = url.searchParams.get('type') || 'weekly';
+  const isDryRun = url.searchParams.get('dry') === '1';
 
   const sb = getSupabase();
   const r = getRedis();
   if (!sb) return NextResponse.json({ error: 'Supabase not configured' }, { status: 500 });
+
+  // Dry run：只顯示會推給誰，不真的推
+  if (isDryRun) {
+    const { users, classMap } = await loadStudentsAndClasses(sb, r);
+    const now = new Date();
+    const preview = [];
+    for (const user of users) {
+      const classInfo = classMap[user.class_name];
+      if (!classInfo?.startDate) continue;
+      const start = new Date(classInfo.startDate);
+      const end = classInfo.endDate ? new Date(classInfo.endDate) : null;
+      if (now < start || (end && now > end)) continue;
+      const week = calcCourseWeek(classInfo, now);
+      if (week === -1 || week < 1 || week > 12) continue;
+      const pushedToday = await wasPushedToday(r, user.id);
+      preview.push({
+        name: user.display_name || '?',
+        className: user.class_name,
+        week,
+        pushedToday,
+      });
+    }
+    return NextResponse.json({ ok: true, dryRun: true, type, total: preview.length, preview });
+  }
 
   try {
     const { users, classMap } = await loadStudentsAndClasses(sb, r);

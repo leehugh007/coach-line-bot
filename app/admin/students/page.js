@@ -256,6 +256,22 @@ export default function StudentsPage() {
             </div>
           )}
 
+          {/* 進步紀錄 */}
+          {tags.filter(t => t.progress_detail).length > 0 && (
+            <div style={{ background: 'white', borderRadius: 12, padding: 16, marginBottom: 16, boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}>
+              <div style={{ fontSize: 13, color: '#888', marginBottom: 8 }}>進步紀錄</div>
+              {tags.filter(t => t.progress_detail).map((t, i) => (
+                <div key={i} style={{ padding: '6px 0', borderBottom: i < tags.filter(t2 => t2.progress_detail).length - 1 ? '1px solid #f0f0f0' : 'none', fontSize: 13 }}>
+                  <span style={{ color: '#2E7D32' }}>✓</span>{' '}
+                  {t.progress_detail}
+                  <span style={{ color: '#aaa', fontSize: 11, marginLeft: 8 }}>
+                    {t.date ? new Date(t.date).toLocaleDateString('zh-TW') : ''}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* 對話紀錄 */}
           <div style={{ background: 'white', borderRadius: 12, padding: 16, boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}>
             <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>對話紀錄</div>
