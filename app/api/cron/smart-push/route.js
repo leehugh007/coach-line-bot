@@ -14,6 +14,7 @@
 
 import { NextResponse } from 'next/server';
 import { pushMessage, pushWithQuickReply } from '@/lib/line';
+import { addChatMessage } from '@/lib/chat';
 import { getSupabase } from '@/lib/supabase';
 import { Redis } from '@upstash/redis';
 
@@ -379,9 +380,12 @@ async function handleWeeklyPush(sb, r, users, classMap, now) {
     if (!msg) continue;
 
     try {
-      // LINE Push API 不支援 Quick Reply，改用文字提示
-      const qrHint = msg.qr.map(q => `👉 ${q.label}`).join('\n');
-      await pushMessage(userId, `${msg.text}\n\n${qrHint}\n\n直接點上面的選項，或打字跟我聊都可以 😊`);
+      // LINE Push API 不支援 Quick Reply，用數字選項
+      const qrHint = msg.qr.map((q, i) => `${i + 1}. ${q.label}`).join('\n');
+      const fullMsg = `${msg.text}\n\n回覆數字就好 😊\n${qrHint}`;
+      await pushMessage(userId, fullMsg);
+      // 存入對話紀錄讓 AI 知道上下文（學員回「1」時 AI 能接住）
+      await addChatMessage(userId, 'assistant', fullMsg);
       await r.set(`${WEEK_LOG_PREFIX}${userId}`, String(courseWeek), { ex: 86400 * 60 });
       await recordPush(r, userId);
 
@@ -430,8 +434,8 @@ async function handleEveningPush(sb, r, users, classMap, now) {
       if (!alreadySent) {
         const msg = getRenewalWeek11Message(name);
         try {
-          const qrHint = msg.qr.map(q => `👉 ${q.label}`).join('\n');
-          await pushMessage(userId, `${msg.text}\n\n${qrHint}`);
+          const qrHint = msg.qr.map((q, i) => `${i + 1}. ${q.label}`).join('\n');
+          await pushMessage(userId, `${msg.text}\n\n回覆數字就好 😊\n${qrHint}`);
           await r.set(renewalKey, now.toISOString(), { ex: 86400 * 30 });
           await recordPush(r, userId);
           pushed++;
