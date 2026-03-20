@@ -277,6 +277,20 @@ export async function GET(request) {
   const r = getRedis();
   if (!sb) return NextResponse.json({ error: 'Supabase not configured' }, { status: 500 });
 
+  // Reset：清掉指定班級的週數推播紀錄
+  const resetClass = url.searchParams.get('reset');
+  if (resetClass) {
+    const { users, classMap } = await loadStudentsAndClasses(sb, r);
+    let cleared = 0;
+    for (const user of users) {
+      if (user.class_name !== resetClass) continue;
+      await r.del(`${WEEK_LOG_PREFIX}${user.id}`);
+      await r.del(`${PUSH_LOG_PREFIX}${user.id}`);
+      cleared++;
+    }
+    return NextResponse.json({ ok: true, action: 'reset', class: resetClass, cleared });
+  }
+
   // Dry run：只顯示會推給誰，不真的推
   if (isDryRun) {
     const { users, classMap } = await loadStudentsAndClasses(sb, r);
