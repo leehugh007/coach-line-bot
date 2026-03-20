@@ -16,6 +16,7 @@ import { NextResponse } from 'next/server';
 import { pushMessage, pushWithQuickReply } from '@/lib/line';
 import { addChatMessage } from '@/lib/chat';
 import { getSupabase } from '@/lib/supabase';
+import { getActiveGoal } from '@/lib/user';
 import { Redis } from '@upstash/redis';
 
 const CLASS_PREFIX = 'coach-class:';
@@ -212,8 +213,16 @@ function getWeeklyMessage(week, name) {
 // 沉默推播內容
 // ===================================================================
 
-function getSilentMessage(daysSilent, name, totalInteractions) {
+function getSilentMessage(daysSilent, name, totalInteractions, goalText = null) {
+  // 有目標的學員：優先帶目標追蹤
+  if (goalText && daysSilent >= 2 && daysSilent < 7) {
+    return `${name}，上次你說要試試看「${goalText}」，這幾天做得怎麼樣？\n\n做到了很棒👍 沒做到也沒關係，跟我說狀況，我們一起調整 😊`;
+  }
+
   if (daysSilent >= 7) {
+    if (goalText) {
+      return `${name}，好一陣子沒聊了。之前設的目標「${goalText}」還記得嗎？不管有沒有做到，跟我聊聊近況吧 😊`;
+    }
     if (totalInteractions > 10) {
       return `${name}，你之前跟我聊了${totalInteractions}次，每一次都是你在為自己做的選擇。最近有遇到什麼新的狀況嗎？不管什麼都可以跟我聊 😊`;
     }
@@ -221,7 +230,7 @@ function getSilentMessage(daysSilent, name, totalInteractions) {
   }
 
   const hooks = [
-    `${name}，你知道嗎？很多人以為玉米是蔬菜，其實它是澱粉！類似的隱藏分類還有不少。要不要考考自己？按「這個能吃嗎」試試看 😄`,
+    `${name}，你知道嗎？很多人以為玉米是蔬菜，其實它是澱粉！類似的隱藏分類還有不少。要不要考考自己？按選單的「考考我」試試 😄`,
     `${name}，最近很多同學在問：便利商店到底怎麼搭配最方便？我整理了一個萬用組合，你想看看嗎？`,
     `${name}，分享一個小撇步：自助餐三格配菜都選蔬菜，才剛好一餐的蔬菜量。聽起來很多？其實試了就知道很快就吃完 😄`,
     `${name}，最近有沒有遇到不知道能不能吃的食物？直接問我就好，什麼都可以問 ☺️`,
@@ -510,13 +519,16 @@ async function handleEveningPush(sb, r, users, classMap, now) {
       continue; // 推了回顧就不推沉默
     }
 
-    // === 一般沉默推播 ===
-    const { count: totalInteractions } = await sb.from('conversations')
-      .select('*', { count: 'exact', head: true })
-      .eq('user_id', userId)
-      .eq('role', 'user');
+    // === 一般沉默推播（帶目標） ===
+    const [{ count: totalInteractions }, activeGoal] = await Promise.all([
+      sb.from('conversations')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', userId)
+        .eq('role', 'user'),
+      getActiveGoal(userId),
+    ]);
 
-    const message = getSilentMessage(daysSilent, name, totalInteractions || 0);
+    const message = getSilentMessage(daysSilent, name, totalInteractions || 0, activeGoal?.goal_text);
 
     try {
       await pushMessage(userId, message);

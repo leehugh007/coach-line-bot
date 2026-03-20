@@ -22,7 +22,7 @@ import {
   tryMatchPreloaded, isLinNameDuplicate, setPendingVerify,
   getPendingVerify, clearPendingVerify, tryMatchByRealName,
   setPendingClassSelect, getPendingClassSelect, clearPendingClassSelect,
-  getActiveClassNames,
+  getActiveClassNames, getActiveGoal, setGoal, completeGoal,
 } from '@/lib/user';
 import {
   extractCoachingTags, saveCoachingTags,
@@ -654,6 +654,7 @@ async function bufferAndSchedule(replyToken, userId, text) {
 
       let progressText = '';
       if (sb) {
+        // 載入進步紀錄
         const { data: records } = await sb.from('coaching_tags')
           .select('progress_detail, created_at')
           .eq('user_id', userId)
@@ -663,19 +664,49 @@ async function bufferAndSchedule(replyToken, userId, text) {
 
         const items = (records || []).filter(r => {
           if (!r.progress_detail) return false;
-          // 過濾掉答題/知識類的紀錄（不是真正的身體或生活改變）
           if (/食物分類|回答.*問題|答對|答題|精準回答|快速反應/.test(r.progress_detail)) return false;
           return true;
         });
+
+        // 載入目標
+        const goal = await getActiveGoal(userId);
+        const { data: completedGoals } = await sb.from('goals')
+          .select('goal_text, completed_at')
+          .eq('user_id', userId)
+          .eq('status', 'completed')
+          .order('completed_at', { ascending: false })
+          .limit(3);
+
+        let sections = [];
+        sections.push(`${userName}，你已經跟我聊了 ${interactions} 次 ☺️`);
+
+        // 當前目標
+        if (goal) {
+          const setDate = new Date(goal.created_at).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' });
+          sections.push(`🎯 你的目標（${setDate} 設定）：\n${goal.goal_text}`);
+        }
+
+        // 已完成目標
+        if (completedGoals?.length > 0) {
+          const doneList = completedGoals.map(g => `✅ ${g.goal_text}`).join('\n');
+          sections.push(`做到了的事：\n${doneList}`);
+        }
+
+        // 進步紀錄
         if (items.length > 0) {
           const list = items.map(r => {
             const date = new Date(r.created_at).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' });
             const detail = r.progress_detail.replace(/學生/g, '你');
             return `✓ ${detail}（${date}）`;
           }).join('\n');
-          progressText = `${userName}，你已經跟我聊了 ${interactions} 次 ☺️\n\n你提到過的改變：\n\n${list}\n\n這些都是你一點一點累積出來的 💪`;
+          sections.push(`你提到過的改變：\n${list}`);
+        }
+
+        if (sections.length > 1) {
+          sections.push('這些都是你一點一點累積出來的 💪');
+          progressText = sections.join('\n\n');
         } else {
-          progressText = `${userName}，你已經跟我聊了 ${interactions} 次 ☺️\n\n持續跟我聊，我會幫你記錄身體和習慣上的每一個變化。等累積多了，你回來看會很有成就感的 💪`;
+          progressText = `${userName}，你已經跟我聊了 ${interactions} 次 ☺️\n\n持續跟我聊，我會幫你記錄每一個變化和目標。等累積多了，你回來看會很有成就感的 💪`;
         }
       }
       return await sendMessage(replyToken, userId, progressText || '有什麼想聊的嗎？');
@@ -821,11 +852,14 @@ async function processBatchedMessages(userId, messages) {
     const intent = await classifyIntent(combinedText, recentUserMsgs);
     const profileSlices = intent?.slices || null;
 
-    // === 組合 userContext（用 AI 選取的切片動態注入）===
+    // === 載入當前目標 ===
+    const activeGoal = await getActiveGoal(userId);
+
+    // === 組合 userContext（用 AI 選取的切片動態注入 + 目標）===
     const contextUser = matchedPreload
       ? await getUser(userId)
       : (isIntro ? updatedUser : (user || updatedUser));
-    const userContext = buildUserContext(contextUser, coachingSummary, journeySummary, profileSlices);
+    const userContext = buildUserContext(contextUser, coachingSummary, journeySummary, profileSlices, activeGoal);
 
     console.log(`[MSG] ${userId?.substring(0, 8)}: "${combinedText.substring(0, 60)}", msgs: ${messages.length}, history: ${chatHistory.length}, intro: ${isIntro}, slices: ${profileSlices?.join(',') || 'all'}, context: ${userContext.length}c`);
 
@@ -868,6 +902,18 @@ async function backgroundTagProcessing(userId, userText, aiReply) {
 
     const totalTopics = await saveCoachingTags(userId, tags);
     console.log(`[Tags] Saved: ${tags.topic}/${tags.emotion}, total: ${totalTopics}`);
+
+    // === 目標系統：偵測到新目標 → 儲存 ===
+    if (tags.goal_action) {
+      await setGoal(userId, tags.goal_action, tags.core_issue);
+      console.log(`[Goal] New goal set: ${tags.goal_action}`);
+    }
+
+    // === 目標系統：偵測到目標完成 → 標記完成 ===
+    if (tags.goal_completed === true) {
+      await completeGoal(userId);
+      console.log(`[Goal] Goal completed for ${userId?.substring(0, 8)}`);
+    }
 
     if (await shouldUpdateTrend(userId)) {
       console.log(`[Tags] Triggering trend update at ${totalTopics} topics`);
