@@ -368,6 +368,21 @@ async function handleFollow(replyToken, userId) {
     if (profile?.displayName) displayName = profile.displayName;
   } catch (_) {}
 
+  // 加好友就建 Supabase 紀錄（不管有沒有對話，學員管理頁都看得到）
+  try {
+    const { getSupabase } = await import('@/lib/supabase');
+    const sb = getSupabase();
+    if (sb) {
+      await sb.from('users').upsert({
+        id: userId,
+        display_name: displayName || null,
+        join_date: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'id', ignoreDuplicates: true });
+      console.log(`[Follow] Supabase record created for ${displayName || userId?.substring(0, 8)}`);
+    }
+  } catch (e) { console.error('[Follow] Supabase create error:', e); }
+
   if (activeClasses.length > 0) {
     // 有進行中的班級 → 先問是哪一班
     await setPendingClassSelect(userId, displayName);
