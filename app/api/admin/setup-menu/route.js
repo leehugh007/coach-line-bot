@@ -15,28 +15,38 @@ function checkAuth(request) {
   return key === process.env.ADMIN_API_KEY;
 }
 
-// Rich Menu 定義：2500×843 (compact)，4 欄
+// Rich Menu 定義：2500×1686 (full)，3×2 六格
 const MENU_CONFIG = {
-  size: { width: 2500, height: 843 },
+  size: { width: 2500, height: 1686 },
   selected: true,
-  name: '休校長小幫手選單',
+  name: '休校長小幫手選單 v3',
   chatBarText: '📋 選單',
   areas: [
+    // 上排：左 → 中 → 右
     {
-      bounds: { x: 0, y: 0, width: 625, height: 843 },
+      bounds: { x: 0, y: 0, width: 833, height: 843 },
       action: { type: 'message', label: '下一餐吃什麼', text: '下一餐吃什麼' },
     },
     {
-      bounds: { x: 625, y: 0, width: 625, height: 843 },
+      bounds: { x: 833, y: 0, width: 834, height: 843 },
       action: { type: 'message', label: '這個能吃嗎', text: '這個能吃嗎' },
     },
     {
-      bounds: { x: 1250, y: 0, width: 625, height: 843 },
+      bounds: { x: 1667, y: 0, width: 833, height: 843 },
+      action: { type: 'message', label: '考考我', text: '考考我食物分類' },
+    },
+    // 下排：左 → 中 → 右
+    {
+      bounds: { x: 0, y: 843, width: 833, height: 843 },
+      action: { type: 'message', label: '我的進步', text: '我的進步' },
+    },
+    {
+      bounds: { x: 833, y: 843, width: 834, height: 843 },
       action: { type: 'message', label: '肚子餓了', text: '肚子餓了' },
     },
     {
-      bounds: { x: 1875, y: 0, width: 625, height: 843 },
-      action: { type: 'message', label: '經期怎麼吃', text: '經期怎麼吃' },
+      bounds: { x: 1667, y: 843, width: 833, height: 843 },
+      action: { type: 'message', label: '跟小幫手聊聊', text: '跟小幫手聊聊' },
     },
   ],
 };

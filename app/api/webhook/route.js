@@ -565,6 +565,61 @@ async function bufferAndSchedule(replyToken, userId, text) {
     await clearPendingVerify(userId);
   }
 
+  // === 考考我：隨機食物分類測驗 ===
+  if (trimmed === '考考我食物分類' || trimmed === '考考我' || trimmed === '再考我一題食物分類') {
+    const quizzes = [
+      { q: '南瓜是蔬菜還是澱粉？', a: '澱粉！南瓜、玉米、蓮藕、山藥、芋頭都是澱粉，不是蔬菜 😄' },
+      { q: '玉米是蔬菜還是澱粉？', a: '澱粉！很多人以為玉米是蔬菜，其實它跟飯一樣是澱粉類 😄' },
+      { q: '百頁豆腐是蛋白質還是油脂？', a: '油脂！百頁豆腐在製程中加了很多油，熱量是嫩豆腐的 3 倍 😱' },
+      { q: '酪梨是水果還是油脂？', a: '油脂！酪梨雖然是水果，但主要成分是好的油脂，算在油脂類 😄' },
+      { q: '蓮藕是蔬菜還是澱粉？', a: '澱粉！蓮藕吃起來脆脆的像蔬菜，但其實是澱粉類 😄' },
+      { q: '毛豆是蔬菜還是蛋白質？', a: '蛋白質！毛豆是非常好的植物性蛋白質來源 💪' },
+      { q: '蘿蔔是蔬菜還是澱粉？', a: '蔬菜！白蘿蔔是蔬菜沒錯，但紅蘿蔔吃多了也要注意醣分 😄' },
+      { q: '豆皮是蛋白質還是油脂？', a: '蛋白質！豆皮（生豆皮）是很好的蛋白質來源，但炸豆皮就變油脂了 😄' },
+    ];
+    const quiz = quizzes[Math.floor(Math.random() * quizzes.length)];
+    return await replyWithQuickReply(replyToken, `考考你 😄\n\n${quiz.q}`, [
+      { label: '公布答案', text: `食物分類答案：${quiz.a}` },
+      { label: '再來一題', text: '再考我一題食物分類' },
+      { label: '我有食物想問', text: '我想問其他食物能不能吃' },
+    ]);
+  }
+
+  // === 我的進步：顯示累積的進步紀錄 ===
+  if (trimmed === '我的進步') {
+    try {
+      const { getSupabase } = await import('@/lib/supabase');
+      const sb = getSupabase();
+      const user = await getUser(userId);
+      const interactions = user?.stats?.totalInteractions || 0;
+
+      let progressText = '';
+      if (sb) {
+        const { data: records } = await sb.from('coaching_tags')
+          .select('progress_detail, created_at')
+          .eq('user_id', userId)
+          .not('progress_detail', 'is', null)
+          .order('created_at', { ascending: false })
+          .limit(10);
+
+        const items = (records || []).filter(r => r.progress_detail);
+        if (items.length > 0) {
+          const list = items.map(r => {
+            const date = new Date(r.created_at).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' });
+            return `✓ ${r.progress_detail}（${date}）`;
+          }).join('\n');
+          progressText = `你跟我聊了 ${interactions} 次，以下是你提到的變化：\n\n${list}\n\n這些都是你一餐一餐累積出來的改變 ☺️`;
+        } else {
+          progressText = `你目前跟我聊了 ${interactions} 次。\n\n持續跟我聊，我會幫你記錄身體的每一個變化 ☺️\n\n有什麼想問的嗎？`;
+        }
+      }
+      return await sendMessage(replyToken, userId, progressText || '有什麼想聊的嗎？');
+    } catch (err) {
+      console.error('[Progress] Error:', err);
+      return await sendMessage(replyToken, userId, '有什麼想聊的嗎？飲食或心態上的問題都可以 ☺️');
+    }
+  }
+
   // === 選單觸發：Rich Menu 按鈕 → 問題 + Quick Reply 引導 ===
   const menuTrigger = getMenuTrigger(trimmed);
   if (menuTrigger) {
@@ -836,6 +891,16 @@ const MENU_TRIGGERS = {
       { label: '🩸 經期中', text: '生理期中飲食要注意什麼' },
       { label: '⚖️ 經期體重', text: '生理期體重上升正常嗎' },
       { label: '🏃‍♀️ 經期運動', text: '生理期可以運動嗎' },
+    ]
+  },
+  '跟小幫手聊聊': {
+    response: '有什麼想聊的嗎？不管是心態上的、飲食上的，什麼都可以 ☺️',
+    quickReply: [
+      { label: '😔 最近有點卡', text: '最近飲食確實有點卡關' },
+      { label: '🍽️ 外食不知道怎麼選', text: '外食不知道怎麼選' },
+      { label: '😤 壓力好大想吃', text: '壓力好大好想吃東西' },
+      { label: '🤔 經期怎麼吃', text: '經前很想吃甜食怎麼辦' },
+      { label: '💪 我有好消息', text: '我最近有一些進步想分享' },
     ]
   },
 };
