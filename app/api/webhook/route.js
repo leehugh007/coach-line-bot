@@ -615,7 +615,7 @@ async function bufferAndSchedule(replyToken, userId, text) {
         ? `答對了！🎉\n\n${quiz.food}是${quiz.correct}。${quiz.explain}`
         : `不是喔！😄\n\n${quiz.food}不是${answer}，是${quiz.correct}。\n\n${quiz.explain}`;
       return await replyWithQuickReply(replyToken, feedback, [
-        { label: '再來一題', text: '再考我一題食物分類' },
+        { label: '再來一題', text: `再考我一題食物分類，不要${food}` },
         { label: '我有食物想問', text: '我想問其他食物能不能吃' },
       ]);
     }
@@ -629,13 +629,16 @@ async function bufferAndSchedule(replyToken, userId, text) {
     ]);
   }
 
-  // === 考考我：隨機食物分類測驗 ===
-  if (trimmed === '考考我食物分類' || trimmed === '考考我' || trimmed === '再考我一題食物分類') {
-    const quiz = FOOD_QUIZZES[Math.floor(Math.random() * FOOD_QUIZZES.length)];
+  // === 考考我：隨機食物分類測驗（支援排除上一題） ===
+  const quizTriggerMatch = trimmed.match(/^再考我一題食物分類[，,]不要(.+)$/);
+  if (trimmed === '考考我食物分類' || trimmed === '考考我' || trimmed === '再考我一題食物分類' || quizTriggerMatch) {
+    const excludeFood = quizTriggerMatch ? quizTriggerMatch[1] : null;
+    const pool = excludeFood ? FOOD_QUIZZES.filter(q => q.food !== excludeFood) : FOOD_QUIZZES;
+    const quiz = pool[Math.floor(Math.random() * pool.length)];
     return await replyWithQuickReply(replyToken, `考考你 😄\n\n${quiz.food}是${quiz.optA}還是${quiz.optB}？`, [
       { label: quiz.optA, text: `食物分類答：${quiz.food}→${quiz.optA}` },
       { label: quiz.optB, text: `食物分類答：${quiz.food}→${quiz.optB}` },
-      { label: '換一題', text: '再考我一題食物分類' },
+      { label: '換一題', text: `再考我一題食物分類，不要${quiz.food}` },
       { label: '我有食物想問', text: '我想問其他食物能不能吃' },
     ]);
   }
@@ -658,11 +661,17 @@ async function bufferAndSchedule(replyToken, userId, text) {
           .order('created_at', { ascending: false })
           .limit(10);
 
-        const items = (records || []).filter(r => r.progress_detail);
+        const items = (records || []).filter(r => {
+          if (!r.progress_detail) return false;
+          // 過濾掉答題/知識類的紀錄（不是真正的身體或生活改變）
+          if (/食物分類|回答.*問題|答對|答題|精準回答|快速反應/.test(r.progress_detail)) return false;
+          return true;
+        });
         if (items.length > 0) {
           const list = items.map(r => {
             const date = new Date(r.created_at).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' });
-            return `✓ ${r.progress_detail}（${date}）`;
+            const detail = r.progress_detail.replace(/學生/g, '你');
+            return `✓ ${detail}（${date}）`;
           }).join('\n');
           progressText = `${userName}，你已經跟我聊了 ${interactions} 次 ☺️\n\n你提到過的改變：\n\n${list}\n\n這些都是你一點一點累積出來的 💪`;
         } else {
