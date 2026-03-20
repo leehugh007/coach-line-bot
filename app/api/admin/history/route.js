@@ -76,19 +76,33 @@ export async function GET(request) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  // 取得每個學員的對話數
-  const enriched = [];
-  for (const u of (users || [])) {
-    const { count } = await sb
-      .from('conversations')
-      .select('*', { count: 'exact', head: true })
-      .eq('user_id', u.id);
+  // 一次查完所有學員的對話數（用 SQL RPC 或逐批並行）
+  const userIds = (users || []).map(u => u.id);
+  const countMap = {};
 
-    enriched.push({
-      ...u,
-      conversation_count: count || 0,
-    });
+  if (userIds.length > 0) {
+    // 並行查詢，每批 10 個
+    const batchSize = 10;
+    for (let i = 0; i < userIds.length; i += batchSize) {
+      const batch = userIds.slice(i, i + batchSize);
+      const results = await Promise.all(
+        batch.map(uid =>
+          sb.from('conversations')
+            .select('*', { count: 'exact', head: true })
+            .eq('user_id', uid)
+            .then(r => ({ uid, count: r.count || 0 }))
+        )
+      );
+      for (const r of results) {
+        countMap[r.uid] = r.count;
+      }
+    }
   }
+
+  const enriched = (users || []).map(u => ({
+    ...u,
+    conversation_count: countMap[u.id] || 0,
+  }));
 
   return NextResponse.json({ ok: true, users: enriched });
 }
