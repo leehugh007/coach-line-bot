@@ -35,7 +35,13 @@ export default function StaffPage() {
 
   // 主動關心
   const [outreachSelected, setOutreachSelected] = useState(new Set());
-  const [outreachMsg, setOutreachMsg] = useState('{name}，最近還好嗎？有遇到什麼飲食或心態上的問題都可以跟我聊 ☺️');
+  const [outreachMsg, setOutreachMsg] = useState('{name}，便利商店怎麼搭出一餐健康的 ABC 餐？其實不到 100 元就能搞定。\n\n你平常最常在哪買午餐？我幫你搭 😊');
+  const [outreachQR, setOutreachQR] = useState([
+    { label: '🏪 便利商店', text: '便利商店可以買什麼ABC搭配' },
+    { label: '🍱 自助餐', text: '自助餐怎麼夾比較健康' },
+    { label: '🥞 早餐店', text: '早餐店怎麼點比較好' },
+  ]);
+  const [outreachUseQR, setOutreachUseQR] = useState(true);
   const [outreachSending, setOutreachSending] = useState(false);
   const [outreachResult, setOutreachResult] = useState(null);
 
@@ -202,10 +208,14 @@ export default function StaffPage() {
       const users = students
         .filter(s => outreachSelected.has(s.userId))
         .map(s => ({ id: s.userId, name: s.name }));
+      const payload = { users, message: outreachMsg };
+      if (outreachUseQR && outreachQR.length > 0) {
+        payload.quickReply = outreachQR.filter(q => q.label.trim());
+      }
       const res = await fetch('/api/admin/outreach', {
         method: 'POST',
         headers: { 'x-staff-key': staffKey, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ users, message: outreachMsg }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       setOutreachResult(data);
@@ -319,6 +329,44 @@ export default function StaffPage() {
               rows={3}
               style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid #ddd', fontSize: 14, resize: 'vertical', boxSizing: 'border-box' }}
             />
+
+            {/* Quick Reply 按鈕設定 */}
+            <div style={{ marginTop: 12 }}>
+              <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', color: '#666' }}>
+                <input type="checkbox" checked={outreachUseQR} onChange={e => setOutreachUseQR(e.target.checked)} />
+                附加 Quick Reply 按鈕（學員點一下就能回應）
+              </label>
+              {outreachUseQR && (
+                <div style={{ marginTop: 8, padding: 12, background: 'white', borderRadius: 8, border: '1px solid #eee' }}>
+                  {outreachQR.map((item, i) => (
+                    <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 6, alignItems: 'center' }}>
+                      <input
+                        value={item.label}
+                        onChange={e => { const next = [...outreachQR]; next[i] = { ...next[i], label: e.target.value }; setOutreachQR(next); }}
+                        placeholder="按鈕文字"
+                        style={{ width: 120, padding: '4px 8px', borderRadius: 6, border: '1px solid #ddd', fontSize: 13 }}
+                      />
+                      <input
+                        value={item.text}
+                        onChange={e => { const next = [...outreachQR]; next[i] = { ...next[i], text: e.target.value }; setOutreachQR(next); }}
+                        placeholder="學員點了會發送的訊息"
+                        style={{ flex: 1, padding: '4px 8px', borderRadius: 6, border: '1px solid #ddd', fontSize: 13 }}
+                      />
+                      <button onClick={() => setOutreachQR(outreachQR.filter((_, j) => j !== i))}
+                        style={{ padding: '2px 8px', border: '1px solid #ddd', borderRadius: 6, fontSize: 12, cursor: 'pointer', background: 'white', color: '#c00' }}>✕</button>
+                    </div>
+                  ))}
+                  {outreachQR.length < 8 && (
+                    <button onClick={() => setOutreachQR([...outreachQR, { label: '', text: '' }])}
+                      style={{ padding: '4px 12px', border: '1px dashed #ccc', borderRadius: 6, fontSize: 12, cursor: 'pointer', background: 'white', color: '#888' }}>
+                      + 新增按鈕
+                    </button>
+                  )}
+                  <div style={{ fontSize: 11, color: '#aaa', marginTop: 6 }}>最多 8 個按鈕。學員點按鈕後，小幫手 AI 會根據內容自動回覆。</div>
+                </div>
+              )}
+            </div>
+
             <div style={{ display: 'flex', gap: 8, marginTop: 10, alignItems: 'center' }}>
               <button onClick={sendOutreach} disabled={outreachSending || outreachSelected.size === 0}
                 style={{ padding: '10px 24px', borderRadius: 8, border: 'none', background: outreachSelected.size > 0 ? '#E8734A' : '#ccc', color: 'white', cursor: outreachSelected.size > 0 ? 'pointer' : 'default', fontWeight: 600, fontSize: 14 }}>
