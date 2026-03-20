@@ -391,6 +391,7 @@ async function handleWeeklyPush(sb, r, users, classMap, now) {
       console.log(`[Weekly] ${name}: week${courseWeek}`);
     } catch (err) {
       console.error(`[Weekly] Failed for ${name}:`, err.message);
+      log.push({ name, week: courseWeek, type: 'error', error: err.message });
     }
   }
 
