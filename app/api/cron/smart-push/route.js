@@ -244,15 +244,17 @@ function getRenewalWeek12Message(name) {
 // ===================================================================
 
 export async function GET(request) {
+  const url = new URL(request.url);
+
   const authHeader = request.headers.get('authorization');
   const isVercelCron = authHeader === `Bearer ${process.env.CRON_SECRET}`;
-  const isAdmin = request.headers.get('x-admin-key') === process.env.ADMIN_API_KEY;
+  const isAdmin = request.headers.get('x-admin-key') === process.env.ADMIN_API_KEY
+    || url.searchParams.get('key') === process.env.ADMIN_API_KEY;
 
   if (!isVercelCron && !isAdmin) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const url = new URL(request.url);
   const type = url.searchParams.get('type') || 'weekly';
 
   const sb = getSupabase();
