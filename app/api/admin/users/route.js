@@ -34,13 +34,21 @@ async function fetchLineDisplayName(userId) {
 }
 
 /**
- * POST /api/admin/users — 批次修復缺少 display_name 的學員
- * 從 LINE API fetch 真實名稱，更新 Supabase + Redis
+ * POST /api/admin/users — 兩種功能
+ * ?action=fix-names  → 批次修復缺少 display_name 的學員（預設）
+ * ?action=rematch    → 重新比對未分班學員 vs 預載名單
  */
 export async function POST(request) {
   const key = request.headers.get('x-admin-key') || request.headers.get('x-staff-key');
   if (key !== process.env.ADMIN_API_KEY && key !== process.env.STAFF_API_KEY) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  const url = new URL(request.url);
+  const action = url.searchParams.get('action') || 'fix-names';
+
+  if (action === 'rematch') {
+    return await handleRematch();
   }
 
   try {
@@ -86,16 +94,7 @@ export async function POST(request) {
   }
 }
 
-/**
- * PUT /api/admin/users — 重新比對：已加好友但未分班的學員 vs 預載名單
- * 用 LINE display_name 去預載名單裡找，比對到就自動分班
- */
-export async function PUT(request) {
-  const key = request.headers.get('x-admin-key') || request.headers.get('x-staff-key');
-  if (key !== process.env.ADMIN_API_KEY && key !== process.env.STAFF_API_KEY) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
+async function handleRematch() {
   try {
     const { getSupabase } = await import('@/lib/supabase');
     const { tryMatchPreloaded, tryMatchByRealName } = await import('@/lib/user');
