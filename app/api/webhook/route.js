@@ -602,6 +602,13 @@ async function bufferAndSchedule(replyToken, userId, text) {
     // --- 油脂偽裝成水果 ---
     { food: '酪梨', optA: '水果', optB: '油脂', correct: '油脂', explain: '酪梨雖然是水果，但主要成分是好的油脂，算在油脂類 😄' },
     { food: '椰子', optA: '水果', optB: '油脂', correct: '油脂', explain: '椰子肉和椰奶的脂肪含量很高，算油脂類。椰子水倒是低熱量 😄' },
+    // --- 容易搞混的分類 ---
+    { food: '奇亞籽', optA: '蔬菜', optB: '油脂', correct: '油脂', explain: '奇亞籽是堅果種子類，屬於油脂！很多人以為是纖維，其實要算在油脂裡 😄' },
+    { food: '大番茄', optA: '蔬菜', optB: '水果', correct: '蔬菜', explain: '大番茄是蔬菜，可以放心吃！但小番茄是水果，要注意份量 😄' },
+    { food: '小番茄', optA: '蔬菜', optB: '水果', correct: '水果', explain: '小番茄是水果喔！一拳頭就是一份水果的量，別當蔬菜無限吃 😄' },
+    { food: '千張', optA: '澱粉', optB: '蛋白質', correct: '蛋白質', explain: '千張是豆製品，屬於蛋白質！拿來包菜包肉是很棒的低碳替代品 💪' },
+    { food: '蘇打餅', optA: '澱粉', optB: '油脂', correct: '油脂', explain: '蘇打餅看起來清淡，其實油脂含量比你想的高不少 😮' },
+    { food: '鍋貼', optA: '蛋白質', optB: '油脂', correct: '油脂', explain: '鍋貼的餡料是高油絞肉，皮又吸油煎炸，油脂量很驚人。最多5個，配燙青菜 😄' },
   ];
 
   // === 食物分類答題：學員選了答案 ===
