@@ -643,6 +643,44 @@ async function bufferAndSchedule(replyToken, userId, text) {
     ]);
   }
 
+  // === 目標回報：三個 Quick Reply 按鈕的處理 ===
+  if (trimmed === '目標回報：我做到了') {
+    const goal = await getActiveGoal(userId);
+    if (goal) {
+      await completeGoal(userId);
+      const userName = (await getUser(userId))?.parsed?.name || '你';
+      return await replyWithQuickReply(replyToken,
+        `${userName}，太棒了！🎉\n\n「${goal.goal_text}」——你真的做到了！\n\n這不是小事，這代表你已經開始建立新的習慣了。每多做一次，下次就更自然。\n\n要不要挑戰下一步？跟我說說你最近的狀況，我幫你想下一個目標 😊`,
+        [
+          { label: '設下一個目標', text: '我想設定下一個目標' },
+          { label: '先這樣就好', text: '先這樣就好' },
+        ]
+      );
+    }
+    return await sendMessage(replyToken, userId, '你目前沒有進行中的目標，要不要聊聊你的狀況，一起設一個？😊');
+  }
+
+  if (trimmed === '目標回報：還在努力') {
+    const goal = await getActiveGoal(userId);
+    if (goal) {
+      return await sendMessage(replyToken, userId,
+        `沒關係，「${goal.goal_text}」本來就不用一次做到完美 😊\n\n只要你有意識到這件事，就已經在改變了。哪怕這週只做到一次，那也是一次的進步。\n\n有什麼卡住的地方嗎？跟我說，我們一起想辦法。`
+      );
+    }
+    return await sendMessage(replyToken, userId, '繼續加油！有什麼想聊的隨時來 😊');
+  }
+
+  if (trimmed === '目標回報：想調整目標') {
+    const goal = await getActiveGoal(userId);
+    if (goal) {
+      await completeGoal(userId); // 先清掉舊的，讓 AI 可以設新的
+      return await sendMessage(replyToken, userId,
+        `好的！之前的目標是「${goal.goal_text}」。\n\n跟我說說哪裡覺得太難或不適合，我幫你調整成更容易執行的版本 😊`
+      );
+    }
+    return await sendMessage(replyToken, userId, '你目前沒有進行中的目標，要不要聊聊你的狀況，一起設一個？😊');
+  }
+
   // === 我的進步：顯示累積的進步紀錄 ===
   if (trimmed === '我的進步') {
     try {
@@ -708,6 +746,14 @@ async function bufferAndSchedule(replyToken, userId, text) {
         } else {
           progressText = `${userName}，你已經跟我聊了 ${interactions} 次 ☺️\n\n持續跟我聊，我會幫你記錄每一個變化和目標。等累積多了，你回來看會很有成就感的 💪`;
         }
+      }
+      // 有目標時加 Quick Reply 讓學員回報
+      if (goal) {
+        return await replyWithQuickReply(replyToken, progressText || '有什麼想聊的嗎？', [
+          { label: '🎯 我做到了', text: '目標回報：我做到了' },
+          { label: '💪 還在努力', text: '目標回報：還在努力' },
+          { label: '🔄 想調整目標', text: '目標回報：想調整目標' },
+        ]);
       }
       return await sendMessage(replyToken, userId, progressText || '有什麼想聊的嗎？');
     } catch (err) {
