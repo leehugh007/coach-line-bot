@@ -691,6 +691,7 @@ async function bufferAndSchedule(replyToken, userId, text) {
       const userName = user?.parsed?.name || user?.lineDisplayName || '你';
 
       let progressText = '';
+      let goal = null;
       if (sb) {
         // 載入進步紀錄
         const { data: records } = await sb.from('coaching_tags')
@@ -707,7 +708,7 @@ async function bufferAndSchedule(replyToken, userId, text) {
         });
 
         // 載入目標
-        const goal = await getActiveGoal(userId);
+        goal = await getActiveGoal(userId);
         const { data: completedGoals } = await sb.from('goals')
           .select('goal_text, completed_at')
           .eq('user_id', userId)
