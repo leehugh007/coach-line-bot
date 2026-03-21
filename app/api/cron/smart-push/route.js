@@ -444,7 +444,9 @@ async function handleEveningPush(sb, r, users, classMap, now) {
         const msg = getRenewalWeek11Message(name);
         try {
           const qrHint = msg.qr.map((q, i) => `${i + 1}. ${q.label}`).join('\n');
-          await pushMessage(userId, `${msg.text}\n\n回覆數字就好 😊\n${qrHint}`);
+          const fullMsg = `${msg.text}\n\n回覆數字就好 😊\n${qrHint}`;
+          await pushMessage(userId, fullMsg);
+          await addChatMessage(userId, 'assistant', fullMsg);
           await r.set(renewalKey, now.toISOString(), { ex: 86400 * 30 });
           await recordPush(r, userId);
           pushed++;
@@ -507,6 +509,7 @@ async function handleEveningPush(sb, r, users, classMap, now) {
 
       try {
         await pushMessage(userId, reviewMsg);
+        await addChatMessage(userId, 'assistant', reviewMsg);
         await r.set(progressReviewKey, String(newProgressCount), { ex: 86400 * 60 });
         await recordPush(r, userId);
         pushed++;
@@ -532,6 +535,8 @@ async function handleEveningPush(sb, r, users, classMap, now) {
 
     try {
       await pushMessage(userId, message);
+      // 存入對話紀錄讓 AI 知道推了什麼（學員回覆時 AI 才接得住）
+      await addChatMessage(userId, 'assistant', message);
       await recordPush(r, userId);
       pushed++;
       log.push({ name, week: courseWeek, type: daysSilent >= 7 ? 'silent-7d' : 'silent-2d', daysSilent });
@@ -581,7 +586,9 @@ async function handleRenewalNoonPush(sb, r, users, classMap, now) {
     const msg = getRenewalWeek12Message(name);
     try {
       const qrHint = msg.qr.map(q => `👉 ${q.label}`).join('\n');
-      await pushMessage(userId, `${msg.text}\n\n${qrHint}`);
+      const fullMsg = `${msg.text}\n\n${qrHint}`;
+      await pushMessage(userId, fullMsg);
+      await addChatMessage(userId, 'assistant', fullMsg);
       await r.set(renewalKey, now.toISOString(), { ex: 86400 * 30 });
       await recordPush(r, userId);
       pushed++;
