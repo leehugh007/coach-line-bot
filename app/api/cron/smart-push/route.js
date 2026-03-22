@@ -740,22 +740,18 @@ async function handleAbcQuizPush(sb, r, users, classMap, now) {
     const weekQuizzes = ABC_QUIZZES[quizWeek];
     if (!weekQuizzes) continue;
 
-    // 避免重複出同一題
-    const sentIds = await r.smembers(ABC_QUIZ_LOG(userId)) || [];
-    const unsent = weekQuizzes.filter(q => !sentIds.includes(q.id));
-    const quiz = unsent.length > 0
-      ? unsent[Math.floor(Math.random() * unsent.length)]
-      : weekQuizzes[Math.floor(Math.random() * weekQuizzes.length)];
+    // 隨機出題（一週 3 題，偶爾重複也 OK）
+    const quiz = weekQuizzes[Math.floor(Math.random() * weekQuizzes.length)];
 
     const optsText = quiz.opts.map((o, i) => `${i + 1}. ${o}`).join('\n');
     const message = `${name}，週末小挑戰來了 😄\n\n${quiz.q}\n\n${optsText}\n\n回覆數字就好 😊`;
 
     try {
-      await pushMessage(userId, message);
-      await addChatMessage(userId, 'assistant', message);
-      await r.set(ABC_QUIZ_KEY(userId), JSON.stringify(quiz), { ex: 86400 * 3 });
-      await r.sadd(ABC_QUIZ_LOG(userId), quiz.id);
-      await r.expire(ABC_QUIZ_LOG(userId), 86400 * 60);
+      // 合併非阻塞操作
+      const pushPromise = pushMessage(userId, message);
+      const chatPromise = addChatMessage(userId, 'assistant', message);
+      const quizPromise = r.set(ABC_QUIZ_KEY(userId), JSON.stringify(quiz), { ex: 86400 * 3 });
+      await Promise.all([pushPromise, chatPromise, quizPromise]);
       await recordPush(r, userId);
       pushed++;
       log.push({ name, week: courseWeek, quizWeek, quizId: quiz.id });
