@@ -611,6 +611,28 @@ async function bufferAndSchedule(replyToken, userId, text) {
     { food: '鍋貼', optA: '蛋白質', optB: '油脂', correct: '油脂', explain: '鍋貼的餡料是高油絞肉，皮又吸油煎炸，油脂量很驚人。最多5個，配燙青菜 😄' },
   ];
 
+  // === 食物收集系統：等級定義 ===
+  const QUIZ_KEY = (uid) => `coach-quiz:${uid}`;
+  const QUIZ_LEVELS = [
+    { min: 0, title: '食物新手 🌱', next: '再認識 {n} 種就升級' },
+    { min: 6, title: '分類達人 ⭐', next: '再認識 {n} 種就升級' },
+    { min: 16, title: 'ABC 高手 🏅', next: '再認識 {n} 種就升級' },
+    { min: 26, title: '營養大師 👑', next: '你已經是最高等級了！' },
+  ];
+  function getQuizLevel(count) {
+    for (let i = QUIZ_LEVELS.length - 1; i >= 0; i--) {
+      if (count >= QUIZ_LEVELS[i].min) {
+        const current = QUIZ_LEVELS[i];
+        const nextLevel = QUIZ_LEVELS[i + 1];
+        const nextText = nextLevel
+          ? current.next.replace('{n}', nextLevel.min - count)
+          : current.next;
+        return { title: current.title, nextText, isMax: !nextLevel };
+      }
+    }
+    return { title: '食物新手 🌱', nextText: '', isMax: false };
+  }
+
   // === 食物分類答題：學員選了答案 ===
   const quizAnswerMatch = trimmed.match(/^食物分類答：(.+)→(.+)$/);
   if (quizAnswerMatch) {
@@ -618,11 +640,22 @@ async function bufferAndSchedule(replyToken, userId, text) {
     const quiz = FOOD_QUIZZES.find(q => q.food === food);
     if (quiz) {
       const isCorrect = answer === quiz.correct;
+      const r = (await import('@upstash/redis')).Redis;
+      const redis = new r({ url: process.env.KV_REST_API_URL, token: process.env.KV_REST_API_TOKEN });
+
+      if (isCorrect) {
+        // 加入收集（用 Set 避免重複計算）
+        await redis.sadd(QUIZ_KEY(userId), food);
+      }
+      const collected = await redis.scard(QUIZ_KEY(userId)) || 0;
+      const level = getQuizLevel(collected);
+
       const feedback = isCorrect
-        ? `答對了！🎉\n\n${quiz.food}是${quiz.correct}。${quiz.explain}`
-        : `不是喔！😄\n\n${quiz.food}不是${answer}，是${quiz.correct}。\n\n${quiz.explain}`;
+        ? `又多認識一個！🎉\n\n${quiz.food}是${quiz.correct}。${quiz.explain}\n\n📊 你已經認識 ${collected} 種食物了（${level.title}）`
+        : `又學到了！😄\n\n${quiz.food}不是${answer}，是${quiz.correct}。\n\n${quiz.explain}\n\n📊 你目前認識 ${collected} 種食物（${level.title}）`;
+
       return await replyWithQuickReply(replyToken, feedback, [
-        { label: '再來一題', text: `再考我一題食物分類，不要${food}` },
+        { label: '繼續收集', text: `再考我一題食物分類，不要${food}` },
         { label: '我有食物想問', text: '我想問其他食物能不能吃' },
       ]);
     }
@@ -631,18 +664,34 @@ async function bufferAndSchedule(replyToken, userId, text) {
   // === 舊版「公布答案」相容（直接回覆不走 AI） ===
   if (trimmed.startsWith('食物分類答案：')) {
     return await replyWithQuickReply(replyToken, trimmed.replace('食物分類答案：', ''), [
-      { label: '再來一題', text: '再考我一題食物分類' },
+      { label: '繼續收集', text: '再考我一題食物分類' },
       { label: '我有食物想問', text: '我想問其他食物能不能吃' },
     ]);
   }
 
-  // === 考考我：隨機食物分類測驗（支援排除上一題） ===
+  // === 考考我：隨機食物分類測驗（支援排除上一題 + 優先出沒答過的） ===
   const quizTriggerMatch = trimmed.match(/^再考我一題食物分類[，,]不要(.+)$/);
   if (trimmed === '考考我食物分類' || trimmed === '考考我' || trimmed === '再考我一題食物分類' || quizTriggerMatch) {
     const excludeFood = quizTriggerMatch ? quizTriggerMatch[1] : null;
-    const pool = excludeFood ? FOOD_QUIZZES.filter(q => q.food !== excludeFood) : FOOD_QUIZZES;
-    const quiz = pool[Math.floor(Math.random() * pool.length)];
-    return await replyWithQuickReply(replyToken, `考考你 😄\n\n${quiz.food}是${quiz.optA}還是${quiz.optB}？`, [
+    const r = (await import('@upstash/redis')).Redis;
+    const redis = new r({ url: process.env.KV_REST_API_URL, token: process.env.KV_REST_API_TOKEN });
+    const answered = await redis.smembers(QUIZ_KEY(userId)) || [];
+    const collected = answered.length;
+    const level = getQuizLevel(collected);
+
+    let pool = FOOD_QUIZZES;
+    if (excludeFood) pool = pool.filter(q => q.food !== excludeFood);
+
+    // 優先出沒答過的題目
+    const unseen = pool.filter(q => !answered.includes(q.food));
+    const pickFrom = unseen.length > 0 ? unseen : pool;
+    const quiz = pickFrom[Math.floor(Math.random() * pickFrom.length)];
+
+    const intro = collected === 0
+      ? `考考你 😄`
+      : `你已經認識 ${collected} 種食物了（${level.title}）\n繼續收集 😄`;
+
+    return await replyWithQuickReply(replyToken, `${intro}\n\n${quiz.food}是${quiz.optA}還是${quiz.optB}？`, [
       { label: quiz.optA, text: `食物分類答：${quiz.food}→${quiz.optA}` },
       { label: quiz.optB, text: `食物分類答：${quiz.food}→${quiz.optB}` },
       { label: '換一題', text: `再考我一題食物分類，不要${quiz.food}` },
