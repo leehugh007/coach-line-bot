@@ -23,6 +23,7 @@ import {
   getPendingVerify, clearPendingVerify, tryMatchByRealName,
   setPendingClassSelect, getPendingClassSelect, clearPendingClassSelect,
   getActiveClassNames, getActiveGoal, setGoal, completeGoal,
+  recordStreak, getStreak,
 } from '@/lib/user';
 import {
   extractCoachingTags, saveCoachingTags,
@@ -754,82 +755,79 @@ async function bufferAndSchedule(replyToken, userId, text) {
     return await sendMessage(replyToken, userId, '你目前沒有進行中的目標，要不要聊聊你的狀況，一起設一個？😊');
   }
 
-  // === 我的進步：顯示累積的進步紀錄 ===
+  // === 我的進步（健康存摺） ===
   if (trimmed === '我的進步') {
     try {
       const { getSupabase } = await import('@/lib/supabase');
+      const { Redis } = await import('@upstash/redis');
+      const redis = new Redis({ url: process.env.KV_REST_API_URL, token: process.env.KV_REST_API_TOKEN });
       const sb = getSupabase();
       const user = await getUser(userId);
-      const interactions = user?.stats?.totalInteractions || 0;
       const userName = user?.parsed?.name || user?.lineDisplayName || '你';
 
-      let progressText = '';
-      let goal = null;
-      if (sb) {
-        // 載入進步紀錄
-        const { data: records } = await sb.from('coaching_tags')
-          .select('progress_detail, created_at')
-          .eq('user_id', userId)
-          .not('progress_detail', 'is', null)
-          .order('created_at', { ascending: false })
-          .limit(10);
+      // 平行載入所有資料
+      const [streak, foodCollected, goal, progressRecords, completedGoals] = await Promise.all([
+        getStreak(userId),
+        redis.scard(`coach-quiz:${userId}`).catch(() => 0),
+        getActiveGoal(userId),
+        sb ? sb.from('coaching_tags').select('progress_detail, created_at').eq('user_id', userId).not('progress_detail', 'is', null).order('created_at', { ascending: false }).limit(5).then(r => r.data) : [],
+        sb ? sb.from('goals').select('goal_text').eq('user_id', userId).eq('status', 'completed').then(r => r.data) : [],
+      ]);
 
-        const items = (records || []).filter(r => {
-          if (!r.progress_detail) return false;
-          if (/食物分類|回答.*問題|答對|答題|精準回答|快速反應/.test(r.progress_detail)) return false;
-          return true;
-        });
+      const items = (progressRecords || []).filter(r => {
+        if (!r.progress_detail) return false;
+        if (/食物分類|回答.*問題|答對|答題|精準回答|快速反應/.test(r.progress_detail)) return false;
+        return true;
+      });
 
-        // 載入目標
-        goal = await getActiveGoal(userId);
-        const { data: completedGoals } = await sb.from('goals')
-          .select('goal_text, completed_at')
-          .eq('user_id', userId)
-          .eq('status', 'completed')
-          .order('completed_at', { ascending: false })
-          .limit(3);
+      // 計算第一天到現在的天數
+      const totalDays = streak.totalDays || 0;
+      const streakDays = streak.streak || 0;
+      const foodCount = foodCollected || 0;
+      const goalsCompleted = completedGoals?.length || 0;
+      const level = getQuizLevel(foodCount);
 
-        let sections = [];
-        sections.push(`${userName}，你已經跟我聊了 ${interactions} 次 ☺️`);
+      // 組合健康存摺
+      let lines = [`🏦 ${userName}的健康存摺\n`];
 
-        // 當前目標
-        if (goal) {
-          const setDate = new Date(goal.created_at).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' });
-          sections.push(`🎯 你的目標（${setDate} 設定）：\n${goal.goal_text}`);
-        }
-
-        // 已完成目標
-        if (completedGoals?.length > 0) {
-          const doneList = completedGoals.map(g => `✅ ${g.goal_text}`).join('\n');
-          sections.push(`做到了的事：\n${doneList}`);
-        }
-
-        // 進步紀錄
-        if (items.length > 0) {
-          const list = items.map(r => {
-            const date = new Date(r.created_at).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' });
-            const detail = r.progress_detail.replace(/學生/g, '你');
-            return `✓ ${detail}（${date}）`;
-          }).join('\n');
-          sections.push(`你提到過的改變：\n${list}`);
-        }
-
-        if (sections.length > 1) {
-          sections.push('這些都是你一點一點累積出來的 💪');
-          progressText = sections.join('\n\n');
-        } else {
-          progressText = `${userName}，你已經跟我聊了 ${interactions} 次 ☺️\n\n持續跟我聊，我會幫你記錄每一個變化和目標。等累積多了，你回來看會很有成就感的 💪`;
-        }
+      if (totalDays > 0) {
+        lines.push(`📅 關注健康：第 ${totalDays} 天`);
       }
-      // 有目標時加 Quick Reply 讓學員回報
+      if (streakDays > 1) {
+        lines.push(`🔥 連續互動：${streakDays} 天`);
+      }
+      if (foodCount > 0) {
+        lines.push(`🧠 食物知識：認識 ${foodCount} 種（${level.title}）`);
+      }
+      if (goalsCompleted > 0) {
+        lines.push(`🎯 完成目標：${goalsCompleted} 個`);
+      }
+      if (items.length > 0) {
+        const changeList = items.slice(0, 3).map(r => {
+          const detail = r.progress_detail.replace(/學生/g, '你');
+          return `✓ ${detail}`;
+        }).join('\n');
+        lines.push(`\n💪 身體變化：\n${changeList}`);
+      }
+
+      // 當前目標
       if (goal) {
-        return await replyWithQuickReply(replyToken, progressText || '有什麼想聊的嗎？', [
+        lines.push(`\n🎯 進行中：${goal.goal_text}`);
+      }
+
+      lines.push(`\n健康跟儲蓄一樣有複利，你每天的選擇都在累積 ☺️`);
+
+      const progressText = lines.join('\n');
+
+      // 有目標時加 Quick Reply
+      if (goal) {
+        return await replyWithQuickReply(replyToken, progressText, [
           { label: '🎯 我做到了', text: '目標回報：我做到了' },
           { label: '💪 還在努力', text: '目標回報：還在努力' },
           { label: '🔄 想調整目標', text: '目標回報：想調整目標' },
         ]);
       }
-      return await sendMessage(replyToken, userId, progressText || '有什麼想聊的嗎？');
+      return await sendMessage(replyToken, userId, progressText);
     } catch (err) {
       console.error('[Progress] Error:', err);
       return await sendMessage(replyToken, userId, '有什麼想聊的嗎？飲食或心態上的問題都可以 ☺️');
@@ -954,8 +952,9 @@ async function processBatchedMessages(userId, messages) {
       console.log(`[Intro] Detected for ${userId?.substring(0, 8)}, processing...`);
     }
 
-    // === 記錄互動 & 檢查里程碑 ===
+    // === 記錄互動 & streak ===
     const updatedUser = await recordInteraction(userId);
+    recordStreak(userId).catch(() => {}); // 非阻塞
     const totalTopics = await getTopicCount(userId);
 
     let milestone = null;

@@ -215,13 +215,18 @@ function getWeeklyMessage(week, name) {
 // 沉默推播內容
 // ===================================================================
 
-function getSilentMessage(daysSilent, name, totalInteractions, goalText = null) {
+function getSilentMessage(daysSilent, name, totalInteractions, goalText = null, streakData = null) {
+  const totalDays = streakData?.totalDays || 0;
+
   // 有目標的學員：優先帶目標追蹤
   if (goalText && daysSilent >= 2 && daysSilent < 7) {
     return `${name}，上次你說要試試看「${goalText}」，這幾天做得怎麼樣？\n\n做到了很棒👍 沒做到也沒關係，跟我說狀況，我們一起調整 😊`;
   }
 
   if (daysSilent >= 7) {
+    if (totalDays > 10) {
+      return `${name}，你已經累積了 ${totalDays} 天的健康存摺。健康隨時可以重新開始，你回來的這一刻就已經在進步了 ☺️\n\n跟我聊聊最近的狀況？`;
+    }
     if (goalText) {
       return `${name}，好一陣子沒聊了。之前設的目標「${goalText}」還記得嗎？不管有沒有做到，跟我聊聊近況吧 😊`;
     }
@@ -527,15 +532,16 @@ async function handleEveningPush(sb, r, users, classMap, now) {
     }
 
     // === 一般沉默推播（帶目標） ===
-    const [{ count: totalInteractions }, activeGoal] = await Promise.all([
+    const [{ count: totalInteractions }, activeGoal, streakData] = await Promise.all([
       sb.from('conversations')
         .select('*', { count: 'exact', head: true })
         .eq('user_id', userId)
         .eq('role', 'user'),
       getActiveGoal(userId),
+      (await import('@/lib/user')).getStreak(userId),
     ]);
 
-    const message = getSilentMessage(daysSilent, name, totalInteractions || 0, activeGoal?.goal_text);
+    const message = getSilentMessage(daysSilent, name, totalInteractions || 0, activeGoal?.goal_text, streakData);
 
     try {
       await pushMessage(userId, message);
