@@ -1,15 +1,17 @@
 /**
  * 智慧推播 Cron Job
  *
- * 三種排程：
- * 1. ?type=weekly   — 每週三 08:00 台灣 → 課程進度推播（12 週 + Quick Reply）
- * 2. ?type=evening   — 每天 20:10 台灣 → 沉默推播（2天+）+ 第11週五續報暖場
+ * 四種排程：
+ * 1. ?type=weekly     — 每週三 08:00 台灣 → 課程進度推播（12 週）
+ * 2. ?type=evening    — 每天 20:10 台灣 → 沉默推播（2天+）+ 第11週五續報暖場
  * 3. ?type=renewal-noon — 每週四 12:15 台灣 → 第12週續報提醒
+ * 4. ?type=abc-quiz   — 每週六 10:00 台灣 → ABC 小挑戰（當週任務 quiz）
  *
  * Vercel Cron（UTC）：
  *   "0 0 * * 3"    → 週三 08:00 台灣
  *   "10 12 * * *"   → 每天 20:10 台灣
  *   "15 4 * * 4"    → 週四 12:15 台灣
+ *   "0 2 * * 6"    → 週六 10:00 台灣
  */
 
 import { NextResponse } from 'next/server';
@@ -348,6 +350,8 @@ export async function GET(request) {
       result = await handleEveningPush(sb, r, users, classMap, now);
     } else if (type === 'renewal-noon') {
       result = await handleRenewalNoonPush(sb, r, users, classMap, now);
+    } else if (type === 'abc-quiz') {
+      result = await handleAbcQuizPush(sb, r, users, classMap, now);
     } else {
       return NextResponse.json({ error: `Unknown type: ${type}` }, { status: 400 });
     }
@@ -597,6 +601,99 @@ async function handleRenewalNoonPush(sb, r, users, classMap, now) {
       console.log(`[Renewal] ${name}: week12 final reminder`);
     } catch (err) {
       console.error(`[Renewal] Failed for ${name}:`, err.message);
+    }
+  }
+
+  return { pushed, total: users.length, log };
+}
+
+// ===================================================================
+// 4. ABC 小挑戰（週六 10:00）
+// ===================================================================
+
+const ABC_QUIZ_KEY = (uid) => `coach-abc-quiz:${uid}`;
+const ABC_QUIZ_LOG = (uid) => `coach-abc-quiz-log:${uid}`;
+
+const ABC_QUIZZES = {
+  1: [
+    { id: 'w1a', q: '你知道為什麼要先吃菜嗎？', opts: ['因為菜熱量低吃了不會胖', '纖維會減緩血糖上升，胰島素不用那麼累', '吃菜比較省錢'],
+      feedback: '纖維就像緩衝墊，讓後面吃進去的澱粉慢慢被吸收，血糖就不會暴衝。同樣的食物只是換順序，血糖波動就少了 35%！' },
+    { id: 'w1b', q: '同一餐食物只是改成「先菜再肉最後飯」，血糖波動大約可以減少多少？', opts: ['5%', '35%', '80%'],
+      feedback: 'UCLA 研究發現可以減少 35%！不用少吃任何東西，只是換個順序，胰島素就少加班三分之一。這大概是最簡單、最便宜、馬上能做的一招 💪' },
+    { id: 'w1c', q: '晚餐輕碳水的目的是什麼？', opts: ['戒掉澱粉，碳水是壞東西', '讓胰島素早點下班，睡覺時升糖素出來燒脂肪', '餓著才能瘦'],
+      feedback: '不是戒澱粉！是讓胰島素晚上能休息。你可以飯量減少，或換成地瓜南瓜，或多吃菜和肉。一休說：「不吃什麼比較難，但增加什麼容易得多」☺️' },
+  ],
+  2: [
+    { id: 'w2a', q: '飯後走路的真正好處是什麼？', opts: ['燃燒大量卡路里', '肌肉在動的時候可以不靠胰島素就直接吸收血糖', '幫助消化不脹氣'],
+      feedback: '肌肉就是一塊超大海綿！走路時肌肉自己就會把血糖吸進去，等於幫胰島素開了一條免費通道。吃完飯起來走走就有用 😊' },
+    { id: 'w2b', q: '為什麼要練習空腹 10 小時？', opts: ['讓胃休息消化更好', '讓升糖素有機會上班燃燒脂肪', '習慣挨餓就會瘦'],
+      feedback: '身體裡有兩個荷爾蒙在輪班：胰島素負責儲存，升糖素負責燃燒。只要一吃東西胰島素就上班，升糖素就下班。空腹 10 小時，是讓升糖素終於有機會去燒脂肪 🔥' },
+    { id: 'w2c', q: '含糖飲料的果糖到了肝臟會怎樣？', opts: ['變成能量讓你精神好', '肝臟把糖製造成脂肪，存到肚子上', '直接排出體外'],
+      feedback: '一休說：「很多時候我們都是喝胖的。」高果糖糖漿到了肝臟，肝臟會把糖加工成油，直接存到你肚子上 😮' },
+  ],
+  3: [
+    { id: 'w3a', q: '日行 5000 步大約消耗多少大卡？', opts: ['50 大卡', '250～300 大卡', '800 大卡'],
+      feedback: '大約 250～300 大卡！不用去健身房，用零碎的時間多走路。原地踏步、走樓梯不搭電梯，都算 😊' },
+    { id: 'w3b', q: '前一天不小心吃比較多，隔天最聰明的做法是？', opts: ['整天不吃補回來', '把空腹時間拉長一點，讓身體優先消耗', '瘋狂運動消耗掉'],
+      feedback: '不用懲罰自己！空腹時間稍微拉長，身體就會優先使用多吃的熱量。在 10 到 12 小時之間彈性調整就好 ☺️' },
+    { id: 'w3c', q: '為什麼外食要優先選「滷燙煮蒸烤」？', opts: ['這樣熱量最低', '高溫油炸產生發炎物質，讓細胞門鎖生鏽，胰島素效率變差', '油炸的都不好吃'],
+      feedback: '發炎讓細胞門鎖生鏽，胰島素敲門敲不開，身體就派更多胰島素，越來越容易囤積。炸排骨換成滷排骨，同樣有肉，身體反應差很多！' },
+  ],
+  4: [
+    { id: 'w4a', q: '為什麼喝水可以幫助瘦身？', opts: ['水會沖掉脂肪', '脂肪分解需要水，水不夠代謝跑不動', '喝水可以代替吃飯'],
+      feedback: '脂肪分解是化學反應，需要水。水不夠就像水龍頭只開一點洗碗，洗得完但很慢。公式：體重 × 30cc = 每天喝水量 💧' },
+    { id: 'w4b', q: '每口咀嚼 20-30 下的目的是什麼？', opts: ['讓食物更好吃', '讓大腦有時間接收飽足感訊號，自然不會吃過量', '讓牙齒更健康'],
+      feedback: '大腦需要大約 20 分鐘才能收到「飽了」的訊號。吃太快大腦還沒反應就已經吃超了。慢慢嚼，身體會告訴你什麼時候夠了 ☺️' },
+    { id: 'w4c', q: '想吃甜時用水果代替甜點，為什麼比較好？', opts: ['水果完全沒有糖分', '水果有纖維，身體處理起來比精緻糖輕鬆很多', '水果熱量是零'],
+      feedback: '水果當然有糖，但有纖維包覆，身體不會像處理精緻糖那樣手忙腳亂。想喝甜的時候吃顆芭樂、一片西瓜，有纖維的糖分身體輕鬆很多 😊' },
+  ],
+};
+
+async function handleAbcQuizPush(sb, r, users, classMap, now) {
+  let pushed = 0;
+  const log = [];
+
+  for (const user of users) {
+    const userId = user.id;
+    const name = user.display_name || '同學';
+    const classInfo = classMap[user.class_name];
+    if (!classInfo?.startDate) continue;
+
+    const startDate = new Date(classInfo.startDate);
+    const endDate = classInfo.endDate ? new Date(classInfo.endDate) : null;
+    if (now < startDate || (endDate && now > endDate)) continue;
+
+    const courseWeek = calcCourseWeek(classInfo, now);
+    if (courseWeek < 1 || courseWeek > 12) continue;
+
+    // 第 1-4 週有對應題目，第 5 週以上隨機從 1-4 週出
+    const quizWeek = courseWeek <= 4 ? courseWeek : Math.ceil(Math.random() * 4);
+    const weekQuizzes = ABC_QUIZZES[quizWeek];
+    if (!weekQuizzes) continue;
+
+    // 避免重複出同一題
+    const sentIds = await r.smembers(ABC_QUIZ_LOG(userId)) || [];
+    const unsent = weekQuizzes.filter(q => !sentIds.includes(q.id));
+    const quiz = unsent.length > 0
+      ? unsent[Math.floor(Math.random() * unsent.length)]
+      : weekQuizzes[Math.floor(Math.random() * weekQuizzes.length)];
+
+    const optsText = quiz.opts.map((o, i) => `${i + 1}. ${o}`).join('\n');
+    const message = `${name}，週末小挑戰來了 😄\n\n${quiz.q}\n\n${optsText}\n\n回覆數字就好 😊`;
+
+    try {
+      await pushMessage(userId, message);
+      await addChatMessage(userId, 'assistant', message);
+      await r.set(ABC_QUIZ_KEY(userId), JSON.stringify(quiz), { ex: 86400 * 3 });
+      await r.sadd(ABC_QUIZ_LOG(userId), quiz.id);
+      await r.expire(ABC_QUIZ_LOG(userId), 86400 * 60);
+      await recordPush(r, userId);
+      pushed++;
+      log.push({ name, week: courseWeek, quizWeek, quizId: quiz.id });
+      await logPushHistory(r, name, `ABC小挑戰W${quizWeek}`, quiz.q);
+      console.log(`[ABCQuiz] ${name}: week${courseWeek} quiz=${quiz.id}`);
+    } catch (err) {
+      console.error(`[ABCQuiz] Failed for ${name}:`, err.message);
     }
   }
 

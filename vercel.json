@@ -11,6 +11,10 @@
     {
       "path": "/api/cron/smart-push?type=renewal-noon",
       "schedule": "15 4 * * 4"
+    },
+    {
+      "path": "/api/cron/smart-push?type=abc-quiz",
+      "schedule": "0 2 * * 6"
     }
   ]
 }

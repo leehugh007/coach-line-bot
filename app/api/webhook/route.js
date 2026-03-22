@@ -565,6 +565,23 @@ async function bufferAndSchedule(replyToken, userId, text) {
     await clearPendingVerify(userId);
   }
 
+  // === ABC 小挑戰回覆處理（學員回覆推播的數字） ===
+  if (/^[123]$/.test(trimmed)) {
+    try {
+      const { Redis } = await import('@upstash/redis');
+      const redis = new Redis({ url: process.env.KV_REST_API_URL, token: process.env.KV_REST_API_TOKEN });
+      const quizData = await redis.get(`coach-abc-quiz:${userId}`);
+      if (quizData) {
+        const quiz = typeof quizData === 'string' ? JSON.parse(quizData) : quizData;
+        const choiceIdx = parseInt(trimmed) - 1;
+        const chosen = quiz.opts?.[choiceIdx] || '';
+        await redis.del(`coach-abc-quiz:${userId}`);
+        const response = `你選了「${chosen}」\n\n${quiz.feedback}\n\n又多學了一個課程知識 ☺️`;
+        return await sendMessage(replyToken, userId, response);
+      }
+    } catch (_) { /* 不是 ABC quiz 回覆，繼續正常流程 */ }
+  }
+
   // === 食物分類測驗題庫（學員最常搞混的食物） ===
   const FOOD_QUIZZES = [
     // --- 偽裝成蔬菜的澱粉 ---
