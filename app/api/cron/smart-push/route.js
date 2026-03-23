@@ -736,6 +736,9 @@ async function handleAbcQuizPush(sb, r, users, classMap, now) {
     const courseWeek = calcCourseWeek(classInfo, now);
     if (courseWeek < 1 || courseWeek > 12) continue;
 
+    // 防重複：今天已推過就跳過（防止超時重推）
+    if (await wasPushedToday(r, userId)) continue;
+
     const quizWeek = Math.min(courseWeek, 12);
     const weekQuizzes = ABC_QUIZZES[quizWeek];
     if (!weekQuizzes) continue;
@@ -747,12 +750,12 @@ async function handleAbcQuizPush(sb, r, users, classMap, now) {
     const message = `${name}，週末小挑戰來了 😄\n\n${quiz.q}\n\n${optsText}\n\n回覆數字就好 😊`;
 
     try {
-      // 合併非阻塞操作
+      // 先記錄推播（防止超時重推時重複送）
+      await recordPush(r, userId);
       const pushPromise = pushMessage(userId, message);
       const chatPromise = addChatMessage(userId, 'assistant', message);
-      const quizPromise = r.set(ABC_QUIZ_KEY(userId), JSON.stringify(quiz), { ex: 86400 * 3 });
+      const quizPromise = r.set(ABC_QUIZ_KEY(userId), JSON.stringify(quiz), { ex: 86400 * 3 })
       await Promise.all([pushPromise, chatPromise, quizPromise]);
-      await recordPush(r, userId);
       pushed++;
       log.push({ name, week: courseWeek, quizWeek, quizId: quiz.id });
       await logPushHistory(r, name, `ABC小挑戰W${quizWeek}`, quiz.q);
