@@ -66,8 +66,9 @@ export async function POST(request) {
       ok: true,
       imported: result.imported,
       skipped: result.skipped,
+      reassigned: result.reassigned || 0,
       errors: errors.length > 0 ? errors : undefined,
-      message: `成功匯入 ${result.imported} 筆，跳過 ${result.skipped} 筆${errors.length > 0 ? `，${errors.length} 筆格式錯誤` : ''}`,
+      message: `成功匯入 ${result.imported} 筆，跳過 ${result.skipped} 筆${result.reassigned ? `，${result.reassigned} 位舊生自動換班` : ''}${errors.length > 0 ? `，${errors.length} 筆格式錯誤` : ''}`,
     });
 
   } catch (err) {
