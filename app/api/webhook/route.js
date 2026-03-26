@@ -601,6 +601,12 @@ async function bufferAndSchedule(replyToken, userId, text) {
     return { title: '食物新手 🌱', nextText: '', isMax: false };
   }
 
+  // === 瘦身知識大挑戰：網頁版是非題測驗 ===
+  if (trimmed === '#瘦身知識大挑戰' || trimmed === '#知識大挑戰' || trimmed === '瘦身知識大挑戰' || trimmed === '知識大挑戰') {
+    const knowledgeUrl = `https://coach-line-bot.vercel.app/knowledge?u=${userId}`;
+    return await sendMessage(replyToken, userId, `🧠 瘦身知識大挑戰\n\n10 題是非題，判斷瘦身觀念是對是錯！\n打破迷思、建立正確知識 💪\n\n👉 ${knowledgeUrl}`);
+  }
+
   // === 食物大挑戰：網頁版測驗遊戲 ===
   if (trimmed === '#食物大挑戰' || trimmed === '食物大挑戰') {
     const quizUrl = `https://coach-line-bot.vercel.app/quiz?u=${userId}`;
