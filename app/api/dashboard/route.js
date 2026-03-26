@@ -46,22 +46,15 @@ export async function GET(request) {
       sb.from('goals').select('goal_text, status, completed_at, created_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(10),
       sb.from('milestones').select('milestone, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
       sb.from('conversations').select('id', { count: 'exact', head: true }).eq('user_id', userId),
-      sb.rpc('count_active_days', { uid: userId }).catch(() => null),
+      sb.from('conversations').select('created_at').eq('user_id', userId),
     ]);
 
-    // 互動天數（如果 rpc 不存在，用 fallback）
+    // 互動天數：從對話紀錄算 distinct dates
     let activeDays = 0;
-    if (activeDaysRes?.data != null) {
-      activeDays = activeDaysRes.data;
-    } else {
-      // fallback: 直接查 distinct dates
-      const { data: dates } = await sb.from('conversations')
-        .select('created_at')
-        .eq('user_id', userId);
-      if (dates) {
-        const uniqueDays = new Set(dates.map(d => d.created_at?.substring(0, 10)));
-        activeDays = uniqueDays.size;
-      }
+    const dates = activeDaysRes?.data;
+    if (dates && dates.length > 0) {
+      const uniqueDays = new Set(dates.map(d => d.created_at?.substring(0, 10)));
+      activeDays = uniqueDays.size;
     }
 
     const quizCollected = quizRes.data?.length || 0;
