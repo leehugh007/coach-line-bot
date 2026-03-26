@@ -1,44 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-
-// Same quiz data as the main quiz page
-const FOOD_QUIZZES = [
-  { food: '南瓜', correct: '澱粉' },
-  { food: '玉米', correct: '澱粉' },
-  { food: '蓮藕', correct: '澱粉' },
-  { food: '山藥', correct: '澱粉' },
-  { food: '芋頭', correct: '澱粉' },
-  { food: '菱角', correct: '澱粉' },
-  { food: '栗子', correct: '澱粉' },
-  { food: '紅豆', correct: '澱粉' },
-  { food: '綠豆', correct: '澱粉' },
-  { food: '冬粉', correct: '澱粉' },
-  { food: '米粉', correct: '澱粉' },
-  { food: '蘿蔔', correct: '蔬菜' },
-  { food: '玉米筍', correct: '蔬菜' },
-  { food: '蒟蒻', correct: '蔬菜' },
-  { food: '秋葵', correct: '蔬菜' },
-  { food: '百頁豆腐', correct: '油脂' },
-  { food: '花生', correct: '油脂' },
-  { food: '腰果', correct: '油脂' },
-  { food: '培根', correct: '油脂' },
-  { food: '貢丸', correct: '油脂' },
-  { food: '熱狗', correct: '油脂' },
-  { food: '毛豆', correct: '蛋白質' },
-  { food: '豆皮', correct: '蛋白質' },
-  { food: '蛋豆腐', correct: '蛋白質' },
-  { food: '豆漿', correct: '蛋白質' },
-  { food: '米漿', correct: '澱粉' },
-  { food: '酪梨', correct: '油脂' },
-  { food: '椰子', correct: '油脂' },
-  { food: '奇亞籽', correct: '油脂' },
-  { food: '大番茄', correct: '蔬菜' },
-  { food: '小番茄', correct: '水果' },
-  { food: '千張', correct: '蛋白質' },
-  { food: '蘇打餅', correct: '油脂' },
-  { food: '鍋貼', correct: '油脂' },
-];
+import { FOOD_QUIZZES, QUIZ_LEVELS, QUIZ_CATEGORIES } from '@/lib/quiz-data';
 
 const TOTAL_FOODS = FOOD_QUIZZES.length;
 
@@ -48,14 +11,12 @@ const CATEGORY_COLORS = {
   '蔬菜': { bg: '#F1F8E9', color: '#33691E', emoji: '🥬' },
   '油脂': { bg: '#FFF8E1', color: '#F57F17', emoji: '🥑' },
   '水果': { bg: '#FCE4EC', color: '#880E4F', emoji: '🍎' },
+  '飲品': { bg: '#E3F2FD', color: '#1565C0', emoji: '🥤' },
+  '加工食品': { bg: '#FBE9E7', color: '#BF360C', emoji: '🍱' },
+  '調味料': { bg: '#F3E5F5', color: '#6A1B9A', emoji: '🧂' },
 };
 
-const LEVELS = [
-  { min: 0, title: '食物新手', emoji: '🌱' },
-  { min: 6, title: '分類達人', emoji: '⭐' },
-  { min: 15, title: '營養高手', emoji: '🏆' },
-  { min: 25, title: '食物大師', emoji: '👑' },
-];
+const LEVELS = QUIZ_LEVELS.map(l => ({ min: l.min, title: l.title, emoji: l.emoji }));
 
 function getLevel(count) {
   for (let i = LEVELS.length - 1; i >= 0; i--) {
@@ -71,11 +32,23 @@ function getNextLevel(count) {
   return null;
 }
 
-// Group foods by category
-const CATEGORIES_ORDER = ['澱粉', '蛋白質', '油脂', '蔬菜', '水果'];
+// Map category id to display name for grouping
+const CATEGORY_DISPLAY = {
+  'starch-disguise': '澱粉',
+  'protein': '蛋白質',
+  'fat': '油脂',
+  'vegetable': '蔬菜',
+  'fruit': '水果',
+  'beverage': '飲品',
+  'processed': '加工食品',
+  'sauce': '調味料',
+};
+
+// Group foods by display category
+const CATEGORIES_ORDER = ['澱粉', '蛋白質', '油脂', '蔬菜', '水果', '飲品', '加工食品', '調味料'];
 const FOODS_BY_CATEGORY = {};
 for (const cat of CATEGORIES_ORDER) {
-  FOODS_BY_CATEGORY[cat] = FOOD_QUIZZES.filter(q => q.correct === cat);
+  FOODS_BY_CATEGORY[cat] = FOOD_QUIZZES.filter(q => CATEGORY_DISPLAY[q.category] === cat);
 }
 
 export default function HistoryPage() {

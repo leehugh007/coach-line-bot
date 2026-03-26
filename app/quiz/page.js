@@ -1,62 +1,12 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { FOOD_QUIZZES, QUIZ_LEVELS } from '@/lib/quiz-data';
 
-// === 食物分類測驗題庫（34 題，來自 webhook/route.js） ===
-const FOOD_QUIZZES = [
-  // --- 偽裝成蔬菜的澱粉 ---
-  { food: '南瓜', optA: '蔬菜', optB: '澱粉', correct: '澱粉', explain: '南瓜、玉米、蓮藕、山藥、芋頭都是澱粉，不是蔬菜' },
-  { food: '玉米', optA: '蔬菜', optB: '澱粉', correct: '澱粉', explain: '很多人以為玉米是蔬菜，其實它跟飯一樣是澱粉類' },
-  { food: '蓮藕', optA: '蔬菜', optB: '澱粉', correct: '澱粉', explain: '蓮藕吃起來脆脆的像蔬菜，但其實是澱粉類' },
-  { food: '山藥', optA: '蔬菜', optB: '澱粉', correct: '澱粉', explain: '山藥跟地瓜一樣是澱粉類，吃了就要減少飯量喔' },
-  { food: '芋頭', optA: '蔬菜', optB: '澱粉', correct: '澱粉', explain: '芋頭是澱粉！芋頭牛奶、芋圓都是澱粉+澱粉，要注意份量' },
-  { food: '菱角', optA: '蔬菜', optB: '澱粉', correct: '澱粉', explain: '菱角吃起來像零食，但它其實是澱粉，吃多了等於多吃飯' },
-  { food: '栗子', optA: '堅果', optB: '澱粉', correct: '澱粉', explain: '栗子雖然長得像堅果，但主要成分是澱粉，不是油脂' },
-  // --- 偽裝成蛋白質的澱粉 ---
-  { food: '紅豆', optA: '蛋白質', optB: '澱粉', correct: '澱粉', explain: '紅豆、綠豆、花豆雖然叫「豆」，但主要成分是澱粉' },
-  { food: '綠豆', optA: '蛋白質', optB: '澱粉', correct: '澱粉', explain: '綠豆跟紅豆一樣是澱粉！綠豆湯、綠豆沙都算澱粉類' },
-  { food: '冬粉', optA: '蔬菜', optB: '澱粉', correct: '澱粉', explain: '冬粉看起來清淡透明，但它是綠豆澱粉做的，一碗跟一碗白飯差不多' },
-  { food: '米粉', optA: '蔬菜', optB: '澱粉', correct: '澱粉', explain: '米粉就是米做的，跟白飯一樣是澱粉！炒米粉看起來少少的但澱粉量不低' },
-  // --- 真的是蔬菜 ---
-  { food: '蘿蔔', optA: '蔬菜', optB: '澱粉', correct: '蔬菜', explain: '白蘿蔔是蔬菜沒錯，但紅蘿蔔吃多了也要注意醣分' },
-  { food: '玉米筍', optA: '蔬菜', optB: '澱粉', correct: '蔬菜', explain: '玉米筍跟玉米不一樣！玉米筍是蔬菜，可以放心吃' },
-  { food: '蒟蒻', optA: '澱粉', optB: '蔬菜', correct: '蔬菜', explain: '蒟蒻幾乎零熱量，算蔬菜/纖維類，嘴饞的好朋友' },
-  { food: '秋葵', optA: '蔬菜', optB: '澱粉', correct: '蔬菜', explain: '秋葵是蔬菜，而且黏液對腸胃很好，安心吃' },
-  // --- 偽裝成蛋白質的油脂 ---
-  { food: '百頁豆腐', optA: '蛋白質', optB: '油脂', correct: '油脂', explain: '百頁豆腐在製程中加了很多油，熱量是嫩豆腐的 3 倍' },
-  { food: '花生', optA: '蛋白質', optB: '油脂', correct: '油脂', explain: '花生雖然叫「豆」但主要成分是油脂，一小把就好' },
-  { food: '腰果', optA: '蛋白質', optB: '油脂', correct: '油脂', explain: '所有堅果（腰果、杏仁、核桃）都是油脂類，一天一小把就夠了' },
-  { food: '培根', optA: '蛋白質', optB: '油脂', correct: '油脂', explain: '培根大部分熱量來自脂肪，算油脂類。想吃肉選雞胸、里肌更好' },
-  { food: '貢丸', optA: '蛋白質', optB: '油脂', correct: '油脂', explain: '貢丸是加工品，裡面加了很多油和澱粉，蛋白質含量其實不高' },
-  { food: '熱狗', optA: '蛋白質', optB: '油脂', correct: '油脂', explain: '熱狗是加工肉品，脂肪含量很高，選原型肉類比較好' },
-  // --- 真的是蛋白質 ---
-  { food: '毛豆', optA: '蔬菜', optB: '蛋白質', correct: '蛋白質', explain: '毛豆是非常好的植物性蛋白質來源' },
-  { food: '豆皮', optA: '蛋白質', optB: '油脂', correct: '蛋白質', explain: '豆皮（生豆皮）是很好的蛋白質來源，但炸豆皮就變油脂了' },
-  { food: '蛋豆腐', optA: '蛋白質', optB: '油脂', correct: '蛋白質', explain: '蛋豆腐是蛋+豆漿做的，是好的蛋白質來源（但日式炸蛋豆腐就不同了）' },
-  { food: '豆漿', optA: '蛋白質', optB: '澱粉', correct: '蛋白質', explain: '無糖豆漿是很好的蛋白質來源！記得選無糖的' },
-  // --- 容易搞混的飲品 ---
-  { food: '米漿', optA: '蛋白質', optB: '澱粉', correct: '澱粉', explain: '米漿是米+花生做的，主要成分是澱粉+油脂，不是蛋白質' },
-  // --- 油脂偽裝成水果 ---
-  { food: '酪梨', optA: '水果', optB: '油脂', correct: '油脂', explain: '酪梨雖然是水果，但主要成分是好的油脂，算在油脂類' },
-  { food: '椰子', optA: '水果', optB: '油脂', correct: '油脂', explain: '椰子肉和椰奶的脂肪含量很高，算油脂類。椰子水倒是低熱量' },
-  // --- 容易搞混的分類 ---
-  { food: '奇亞籽', optA: '蔬菜', optB: '油脂', correct: '油脂', explain: '奇亞籽是堅果種子類，屬於油脂！很多人以為是纖維，其實要算在油脂裡' },
-  { food: '大番茄', optA: '蔬菜', optB: '水果', correct: '蔬菜', explain: '大番茄是蔬菜，可以放心吃！但小番茄是水果，要注意份量' },
-  { food: '小番茄', optA: '蔬菜', optB: '水果', correct: '水果', explain: '小番茄是水果喔！一拳頭就是一份水果的量，別當蔬菜無限吃' },
-  { food: '千張', optA: '澱粉', optB: '蛋白質', correct: '蛋白質', explain: '千張是豆製品，屬於蛋白質！拿來包菜包肉是很棒的低碳替代品' },
-  { food: '蘇打餅', optA: '澱粉', optB: '油脂', correct: '油脂', explain: '蘇打餅看起來清淡，其實油脂含量比你想的高不少' },
-  { food: '鍋貼', optA: '蛋白質', optB: '油脂', correct: '油脂', explain: '鍋貼的餡料是高油絞肉，皮又吸油煎炸，油脂量很驚人。最多5個，配燙青菜' },
-];
-
-const TOTAL_FOODS = FOOD_QUIZZES.length; // 34
+const TOTAL_FOODS = FOOD_QUIZZES.length;
 const QUIZ_COUNT = 10;
 
-const LEVELS = [
-  { min: 0, title: '食物新手', emoji: '🌱' },
-  { min: 6, title: '分類達人', emoji: '⭐' },
-  { min: 15, title: '營養高手', emoji: '🏆' },
-  { min: 25, title: '食物大師', emoji: '👑' },
-];
+const LEVELS = QUIZ_LEVELS.map(l => ({ min: l.min, title: l.title, emoji: l.emoji }));
 
 function getLevel(count) {
   for (let i = LEVELS.length - 1; i >= 0; i--) {

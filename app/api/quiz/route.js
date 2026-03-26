@@ -7,13 +7,9 @@
 
 import { getSupabase } from '@/lib/supabase';
 import { pushMessage } from '@/lib/line';
+import { FOOD_QUIZZES, QUIZ_LEVELS } from '@/lib/quiz-data';
 
-const LEVELS = [
-  { min: 0, title: '食物新手', emoji: '🌱' },
-  { min: 6, title: '分類達人', emoji: '⭐' },
-  { min: 15, title: '營養高手', emoji: '🏆' },
-  { min: 25, title: '食物大師', emoji: '👑' },
-];
+const LEVELS = QUIZ_LEVELS.map(l => ({ min: l.min, title: l.title, emoji: l.emoji }));
 
 function getLevel(count) {
   for (let i = LEVELS.length - 1; i >= 0; i--) {
@@ -167,7 +163,7 @@ export async function POST(request) {
       let msg = `🍽️ 食物分類大挑戰結果\n\n`;
       msg += `分數：${score} / ${total}\n`;
       msg += `用時：${timeStr}\n`;
-      msg += `收集進度：${totalCollected} / 34（${level.emoji} ${level.title}）\n`;
+      msg += `收集進度：${totalCollected} / ${FOOD_QUIZZES.length}（${level.emoji} ${level.title}）\n`;
       if (newCollected.length > 0) {
         msg += `\n🆕 新收集：${newCollected.join('、')}\n`;
       }
