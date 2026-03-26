@@ -256,7 +256,7 @@ async function handleGroupMessage(source, userId, text, mention) {
   const groupContext = await getGroupContext(groupId);
   // 排除當前這則（剛剛才存進去的最後一則）
   const contextForDetect = groupContext.slice(0, -1);
-  const detection = await aiDetectQuestion(trimmed, contextForDetect);
+  const detection = await aiDetectQuestion(trimmed, contextForDetect, userId);
   if (!detection || !detection.isQuestion) return;
 
   const confidence = detection.confidence || 0;
@@ -286,7 +286,7 @@ async function handleGroupMessage(source, userId, text, mention) {
     } catch (e) { /* ignore */ }
 
     // 產生草稿回覆
-    const draft = await generateDraftResponse(trimmed, studentContext);
+    const draft = await generateDraftResponse(trimmed, studentContext, userId);
     if (!draft) {
       console.log('[Group-Q] Draft generation failed, skipping');
       return;
@@ -968,7 +968,7 @@ async function processBatchedMessages(userId, messages) {
       .map(msg => msg.parts?.[0]?.text || '')
       .slice(-2)
       .join('；');
-    const intent = await classifyIntent(combinedText, recentUserMsgs);
+    const intent = await classifyIntent(combinedText, recentUserMsgs, userId);
     const profileSlices = intent?.slices || null;
 
     // === 載入當前目標 ===
@@ -983,7 +983,7 @@ async function processBatchedMessages(userId, messages) {
     console.log(`[MSG] ${userId?.substring(0, 8)}: "${combinedText.substring(0, 60)}", msgs: ${messages.length}, history: ${chatHistory.length}, intro: ${isIntro}, slices: ${profileSlices?.join(',') || 'all'}, context: ${userContext.length}c`);
 
     // === AI 回覆（用合併後的完整文字，傳入預計算的意圖）===
-    const reply = await handleMessage(combinedText, chatHistory, userContext, milestone, intent);
+    const reply = await handleMessage(combinedText, chatHistory, userContext, milestone, intent, userId);
 
     // === 儲存對話（存合併後的完整文字）===
     await addChatMessage(userId, 'user', combinedText);
