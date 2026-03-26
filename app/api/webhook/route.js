@@ -651,6 +651,12 @@ async function bufferAndSchedule(replyToken, userId, text) {
     return { title: '食物新手 🌱', nextText: '', isMax: false };
   }
 
+  // === 食物大挑戰：網頁版測驗遊戲 ===
+  if (trimmed === '#食物大挑戰' || trimmed === '食物大挑戰') {
+    const quizUrl = `https://coach-line-bot.vercel.app/quiz?u=${userId}`;
+    return await sendMessage(replyToken, userId, `🍽️ 食物分類大挑戰\n\n10 題限時挑戰，答對就能收集食物！\n看你能認出幾種食物的真面目 😄\n\n👉 ${quizUrl}`);
+  }
+
   // === 食物分類答題：學員選了答案 ===
   const quizAnswerMatch = trimmed.match(/^食物分類答：(.+)→(.+)$/);
   if (quizAnswerMatch) {
