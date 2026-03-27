@@ -49,12 +49,15 @@ async function getPortrait(userId, { displayName, journey, progressRecords, emot
 
   // ── 組合完整素材 ──
 
+  // 把「學員」「學生」「這位學員」替換成名字（journey 和 progress 裡的稱呼問題）
+  const fixName = (text) => text.replace(/這位學員|學員|學生/g, displayName);
+
   // 旅程（AI 已整理的完整故事）
-  const journeyBlock = journey ? `【旅程紀錄】\n${journey}` : '';
+  const journeyBlock = journey ? `【旅程紀錄】\n${fixName(journey)}` : '';
 
   // 進步紀錄（AI 從對話中偵測到的真實改變）
   const progressBlock = (progressRecords || []).length > 0
-    ? `【進步紀錄】\n${progressRecords.slice(0, 8).map(p => `- ${p.detail}`).join('\n')}`
+    ? `【進步紀錄】\n${progressRecords.slice(0, 8).map(p => `- ${fixName(p.detail)}`).join('\n')}`
     : '';
 
   // 情緒變化軌跡
