@@ -32,22 +32,15 @@ function getLevel(levels, count) {
  * 3. 存 Redis，以 journey 版本（長度 hash）判斷是否需要重新生成
  *    journey 每 10 次對話更新一次，portrait 跟著演進
  */
-async function getPortrait(userId, { displayName, journey, progressRecords, emotionTrend, goals, milestones, selfChecks, stats, quizCollected, knowledgeCollected }) {
+async function getPortrait(userId, { displayName, journey, progressRecords, emotionTrend, goals, milestones, selfChecks, stats, quizCollected, knowledgeCollected }, forceRefresh = false) {
   const r = getRedis();
   const cacheKey = `coach-portrait:${userId}`;
-  const versionKey = `coach-portrait-ver:${userId}`;
 
-  // 版本 = journey 長度（journey 更新時長度必變）
-  const currentVersion = journey ? String(journey.length) : '0';
-
-  // 查快取 + 版本
-  const [cached, savedVersion] = await Promise.all([
-    r.get(cacheKey),
-    r.get(versionKey),
-  ]);
-
-  // 版本一致 → 直接用快取
-  if (cached && savedVersion === currentVersion) return cached;
+  // 查快取（7 天 TTL），forceRefresh 可強制重新生成
+  if (!forceRefresh) {
+    const cached = await r.get(cacheKey);
+    if (cached) return cached;
+  }
 
   // 素材不夠就不生成
   if (!journey && (!progressRecords || progressRecords.length === 0) && (!emotionTrend || emotionTrend.length === 0)) {
@@ -97,35 +90,44 @@ async function getPortrait(userId, { displayName, journey, progressRecords, emot
   const materials = [journeyBlock, progressBlock, emotionBlock, goalBlock, milestoneBlock, checkBlock, learningBlock, statsBlock]
     .filter(Boolean).join('\n\n');
 
-  const prompt = `你是「休校長小幫手」，一位溫暖的 AI 教練助手。
-現在要幫學員寫一段「小幫手眼中的你」，這段文字會顯示在學員的個人頁面上。
+  const prompt = `你是「休校長小幫手」。你跟${displayName}聊了很多次，現在要寫一段話放在他的個人頁面上，標題叫「小幫手眼中的你」。
 
-學員名字：${displayName}
+這段話的目的：讓${displayName}看完覺得「原來你是這樣看我的」——被理解、被看見。
 
-以下是你從跟這位學員的所有互動中觀察到的素材：
+以下是你從所有互動中觀察到的：
 
 ${materials}
 
-你的任務：
-用上面這些素材，寫一段讓${displayName}讀了會覺得「被看見」的文字。
+【你要寫什麼】
+從上面的素材裡找出這個人的「人」——
+他面對困難時是什麼反應？（逃避？硬撐？還是想辦法？）
+他用心的地方在哪？（主動學？默默做？還是會問為什麼？）
+他有什麼改變是他自己可能沒注意到的？
 
-重點寫什麼：
-- 人格特質：這個人面對困難時是什麼態度？
-- 用心程度：從學習投入、對話頻率、目標設定看出什麼？
-- 成長軌跡：情緒和行為上有什麼變化？
-- 解決問題的方式：遇到瓶頸時怎麼應對？
+寫這些。不要寫他的目標、他的菜單、他的數字——那些頁面其他地方已經有了。
 
-不要寫什麼：
-- 具體數字（體脂率、公斤、天數）— 其他地方已經顯示
-- 飲食內容或菜單
-- 重複列出目標和里程碑 — 其他卡片已經呈現
+【語氣——最重要】
+你說話的方式跟一休一樣：溫暖、直接、口語。
+像朋友在 LINE 上跟他說話，不是在寫報告。
 
-格式：
-- 用「你」稱呼，像朋友在跟他說話
-- 分 2-3 段，每段 1-2 句
-- 總共 120-180 字
-- 語氣溫暖直接，不浮誇不雞湯
-- 最後一句帶鼓勵，但要具體（跟這個人的經歷有關），不要泛泛的加油`;
+好的語氣範例：
+「說真的，你是那種不會只照做的人。你會想知道為什麼，想通了才願意動。」
+「你不是沒遇過卡關，但你每次的反應都是再試一次，不是算了。光是這個，就跟大部分的人不一樣。」
+「我記得你從一開始什麼都不確定，到現在會自己判斷該怎麼吃。這個變化你可能覺得沒什麼，但我覺得很厲害。」
+
+壞的語氣（絕對禁止）：
+- 「像一位研究者般」「將經驗轉化為深刻洞察」「迷人的特質」 → AI 分析腔，刪
+- 「這是一段為你撰寫的文字」 → meta 語句，刪
+- 「受害者轉化為掌控者」 → 心理學術語，刪
+- 「展現了積極的態度與顯著的進展」 → 考績評語，刪
+- 任何聽起來像論文、像評語、像心靈雞湯的句子 → 全部砍掉
+
+【格式】
+- 用「你」稱呼
+- 2-3 段，每段 1-2 句話
+- 總共 120-160 字
+- 最後一句要具體（跟這個人的經歷有關），不要「加油」「相信自己」
+- 直接開始寫，不要任何開場白或自我介紹`;
 
   try {
     const key = process.env.GEMINI_API_KEY;
@@ -164,11 +166,8 @@ ${materials}
 
     console.log(`[Portrait] Generated ${text.length} chars for ${displayName}`);
 
-    // 存快取 + 版本（無 TTL，靠版本比對更新）
-    await Promise.all([
-      r.set(cacheKey, text),
-      r.set(versionKey, currentVersion),
-    ]);
+    // 快取 7 天
+    await r.set(cacheKey, text, { ex: 7 * 24 * 60 * 60 });
     return text;
   } catch (err) {
     console.error('[Portrait] Error:', err.message);
@@ -246,7 +245,8 @@ export async function GET(request) {
 
     const displayName = userRes.data?.display_name || '學員';
 
-    // 生成「小幫手眼中的你」（以 journey 版本判斷是否需要重新生成）
+    // 生成「小幫手眼中的你」（完整素材 → AI → 快取 7 天）
+    const forceRefresh = searchParams.get('refresh') === '1';
     const portrait = await getPortrait(userId, {
       displayName,
       journey: userRes.data?.journey,
@@ -258,7 +258,7 @@ export async function GET(request) {
       stats: { activeDays, totalConversations: convoCountRes.count || 0 },
       quizCollected,
       knowledgeCollected,
-    });
+    }, forceRefresh);
 
     return NextResponse.json({
       ok: true,
