@@ -52,35 +52,11 @@ export async function POST(request) {
     return NextResponse.json({ ok: true });
   }
 
+  // [2026-03-27] 群組功能暫時關閉，問題偵測邏輯待重新討論
   // LINE 快速通知：掃描群組訊息關鍵字 → 通知教練+助教
-  const mindsetWords = ['放棄','不想','算了','崩潰','撐不下去','做不到','好累','沒用','沒效','受不了','暴食','好想吃','管不住','復胖','不敢量','不想量'];
-  const notifyTargets = [process.env.COACH_USER_ID, process.env.STAFF_USER_ID].filter(Boolean);
-  if (notifyTargets.length > 0) {
-    for (const event of events) {
-      if (event.type === 'message' && event.message?.type === 'text' && event.source?.type === 'group') {
-        const text = event.message.text || '';
-        const matched = mindsetWords.find(w => text.includes(w));
-        if (matched) {
-          try {
-            let name = '學員';
-            try {
-              const profile = await getProfile(event.source.userId);
-              if (profile?.displayName) name = profile.displayName;
-            } catch (_) {}
-            let groupName = '';
-            try {
-              const gs = await getGroupSummary(event.source.groupId);
-              if (gs?.groupName) groupName = `【${gs.groupName}】`;
-            } catch (_) {}
-            const notifyText = `🔴 群組關注${groupName}\n${name} 說：「${text.substring(0, 150)}」\n\n→ 查看後台：https://coach-line-bot.vercel.app/admin`;
-            for (const id of notifyTargets) {
-              try { await pushMessage(id, notifyText); } catch (_) {}
-            }
-          } catch (_) {}
-        }
-      }
-    }
-  }
+  // const mindsetWords = ['放棄','不想','算了','崩潰','撐不下去','做不到','好累','沒用','沒效','受不了','暴食','好想吃','管不住','復胖','不敢量','不想量'];
+  // const notifyTargets = [process.env.COACH_USER_ID, process.env.STAFF_USER_ID].filter(Boolean);
+  // ... (群組快速通知已暫停)
 
   const processPromises = events.map(event => processEvent(event));
 
@@ -126,12 +102,9 @@ async function processEvent(event) {
 
     const { message } = event;
 
-    // ===== 群組訊息：只偵測自介，不回覆 =====
+    // ===== 群組訊息：暫時全部跳過 [2026-03-27] =====
     if (sourceType === 'group' || sourceType === 'room') {
-      if (message.type === 'text') {
-        return await handleGroupMessage(source, userId, message.text, message.mention);
-      }
-      return; // 群組中非文字訊息忽略
+      return; // 群組功能暫停，待重新討論偵測邏輯
     }
 
     // ===== 私訊：buffer 合併後 AI 回覆 =====
@@ -717,83 +690,14 @@ async function bufferAndSchedule(replyToken, userId, text) {
     return await sendMessage(replyToken, userId, '你目前沒有進行中的目標，要不要聊聊你的狀況，一起設一個？😊');
   }
 
-  // === 我的進步（健康存摺） ===
+  // === 我的進步 → 個人 Dashboard ===
   if (trimmed === '我的進步') {
-    try {
-      const { getSupabase } = await import('@/lib/supabase');
-      const { Redis } = await import('@upstash/redis');
-      const redis = new Redis({ url: process.env.KV_REST_API_URL, token: process.env.KV_REST_API_TOKEN });
-      const sb = getSupabase();
-      const user = await getUser(userId);
-      const userName = user?.parsed?.name || user?.lineDisplayName || '你';
-
-      // 平行載入所有資料
-      const [streak, foodCollected, goal, progressRecords, completedGoals] = await Promise.all([
-        getStreak(userId),
-        redis.scard(`coach-quiz:${userId}`).catch(() => 0),
-        getActiveGoal(userId),
-        sb ? sb.from('coaching_tags').select('progress_detail, created_at').eq('user_id', userId).not('progress_detail', 'is', null).order('created_at', { ascending: false }).limit(5).then(r => r.data) : [],
-        sb ? sb.from('goals').select('goal_text').eq('user_id', userId).eq('status', 'completed').then(r => r.data) : [],
-      ]);
-
-      const items = (progressRecords || []).filter(r => {
-        if (!r.progress_detail) return false;
-        if (/食物分類|回答.*問題|答對|答題|精準回答|快速反應/.test(r.progress_detail)) return false;
-        return true;
-      });
-
-      // 計算第一天到現在的天數
-      const totalDays = streak.totalDays || 0;
-      const streakDays = streak.streak || 0;
-      const foodCount = foodCollected || 0;
-      const goalsCompleted = completedGoals?.length || 0;
-      const level = getQuizLevel(foodCount);
-
-      // 組合健康存摺
-      let lines = [`🏦 ${userName}的健康存摺\n`];
-
-      if (totalDays > 0) {
-        lines.push(`📅 關注健康：第 ${totalDays} 天`);
-      }
-      if (streakDays > 1) {
-        lines.push(`🔥 連續互動：${streakDays} 天`);
-      }
-      if (foodCount > 0) {
-        lines.push(`🧠 食物知識：認識 ${foodCount} 種（${level.title}）`);
-      }
-      if (goalsCompleted > 0) {
-        lines.push(`🎯 完成目標：${goalsCompleted} 個`);
-      }
-      if (items.length > 0) {
-        const changeList = items.slice(0, 3).map(r => {
-          const detail = r.progress_detail.replace(/學生/g, '你');
-          return `✓ ${detail}`;
-        }).join('\n');
-        lines.push(`\n💪 身體變化：\n${changeList}`);
-      }
-
-      // 當前目標
-      if (goal) {
-        lines.push(`\n🎯 進行中：${goal.goal_text}`);
-      }
-
-      lines.push(`\n健康跟儲蓄一樣有複利，你每天的選擇都在累積 ☺️`);
-
-      const progressText = lines.join('\n');
-
-      // 有目標時加 Quick Reply
-      if (goal) {
-        return await replyWithQuickReply(replyToken, progressText, [
-          { label: '🎯 我做到了', text: '目標回報：我做到了' },
-          { label: '💪 還在努力', text: '目標回報：還在努力' },
-          { label: '🔄 想調整目標', text: '目標回報：想調整目標' },
-        ]);
-      }
-      return await sendMessage(replyToken, userId, progressText);
-    } catch (err) {
-      console.error('[Progress] Error:', err);
-      return await sendMessage(replyToken, userId, '有什麼想聊的嗎？飲食或心態上的問題都可以 ☺️');
-    }
+    const dashboardUrl = `https://coach-line-bot.vercel.app/dashboard?u=${userId}`;
+    const user = await getUser(userId);
+    const userName = user?.parsed?.name || user?.lineDisplayName || '你';
+    return await sendMessage(replyToken, userId,
+      `${userName}，你的個人進度都在這裡 ☺️\n\n👉 ${dashboardUrl}\n\n心情變化、進步紀錄、食物知識、自我覺察⋯⋯小幫手都幫你記著了`
+    );
   }
 
   // === 選單觸發：Rich Menu 按鈕 → 問題 + Quick Reply 引導 ===
