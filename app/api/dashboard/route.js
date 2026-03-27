@@ -129,6 +129,13 @@ ${materials}
 
   try {
     const key = process.env.GEMINI_API_KEY;
+    if (!key) {
+      console.error('[Portrait] GEMINI_API_KEY not set');
+      return cached || null;
+    }
+
+    console.log(`[Portrait] Generating for ${displayName} (journey=${journey?.length || 0}, progress=${progressRecords?.length || 0})`);
+
     const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=${key}`,
       {
@@ -140,19 +147,31 @@ ${materials}
         }),
       }
     );
+
+    if (!res.ok) {
+      const errText = await res.text();
+      console.error(`[Portrait] Gemini HTTP ${res.status}:`, errText.substring(0, 200));
+      return cached || null;
+    }
+
     const data = await res.json();
     const text = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
 
-    if (text) {
-      // 存快取 + 版本（無 TTL，靠版本比對更新）
-      await Promise.all([
-        r.set(cacheKey, text),
-        r.set(versionKey, currentVersion),
-      ]);
-      return text;
+    if (!text) {
+      console.error('[Portrait] Gemini returned empty. Response:', JSON.stringify(data).substring(0, 300));
+      return cached || null;
     }
+
+    console.log(`[Portrait] Generated ${text.length} chars for ${displayName}`);
+
+    // 存快取 + 版本（無 TTL，靠版本比對更新）
+    await Promise.all([
+      r.set(cacheKey, text),
+      r.set(versionKey, currentVersion),
+    ]);
+    return text;
   } catch (err) {
-    console.error('[Portrait] Gemini error:', err.message);
+    console.error('[Portrait] Error:', err.message);
   }
 
   // 生成失敗時回傳舊的快取（如果有）
