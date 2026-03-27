@@ -38,6 +38,8 @@ export async function GET(request) {
       milestonesRes,
       convoCountRes,
       activeDaysRes,
+      tagsRes,
+      progressRes,
     ] = await Promise.all([
       sb.from('users').select('display_name, class_name, journey, join_date').eq('id', userId).single(),
       sb.from('coach_quiz_collected').select('food').eq('user_id', userId),
@@ -47,6 +49,10 @@ export async function GET(request) {
       sb.from('milestones').select('milestone, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
       sb.from('conversations').select('id', { count: 'exact', head: true }).eq('user_id', userId),
       sb.from('conversations').select('created_at').eq('user_id', userId),
+      // 情緒趨勢：最近 20 筆 coaching_tags
+      sb.from('coaching_tags').select('tag, created_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(20),
+      // 進步紀錄：有 progress_detail 的標籤
+      sb.from('coaching_tags').select('progress_detail, created_at').eq('user_id', userId).not('progress_detail', 'is', null).order('created_at', { ascending: false }).limit(15),
     ]);
 
     // 互動天數：從對話紀錄算 distinct dates
@@ -59,6 +65,22 @@ export async function GET(request) {
 
     const quizCollected = quizRes.data?.length || 0;
     const knowledgeCollected = knowledgeRes.data?.length || 0;
+
+    // 解析情緒趨勢（tag 格式 "topic:emotion:progress_signal:style"）
+    const emotionTrend = (tagsRes.data || []).reverse().map(row => {
+      const parts = (row.tag || '').split(':');
+      return {
+        emotion: parts[1] || 'neutral',
+        progress: parts[2] || 'neutral',
+        date: row.created_at,
+      };
+    });
+
+    // 進步紀錄
+    const progressRecords = (progressRes.data || []).map(row => ({
+      detail: row.progress_detail,
+      date: row.created_at,
+    }));
 
     return NextResponse.json({
       ok: true,
@@ -85,6 +107,8 @@ export async function GET(request) {
         totalConversations: convoCountRes.count || 0,
       },
       journey: userRes.data?.journey || null,
+      emotionTrend,
+      progressRecords,
     });
 
   } catch (err) {

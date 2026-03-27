@@ -3,6 +3,17 @@
 > 用途：讓 Claude Code 快速理解這個專案
 > 最後更新：2026-03-20
 
+## 強制驗證（踩坑後的硬規則，不可跳過）
+
+| 場景 | 做法 | 事故 |
+|------|------|------|
+| 碰資料庫欄位 | 先 `execute_sql` 查 schema，不要假設欄位名 | user_id 欄位不存在導致 sync 全面失敗 |
+| 碰 API 定價 | 先 `WebSearch` 查官方定價，不用記憶中的數字 | Gemini 定價差 2-6 倍，推薦了更貴的模型 |
+| 產出題庫/內容 | 先讀來源素材，只考教過的。同概念一題。出完自審刪不好的 | 196 題裡 47 題送分/重複，學員抱怨 |
+| 委派 Agent | prompt 裡明確要求「查 schema」「查定價」，Agent 不會自己做 | Agent 寫了帶不存在欄位的 code |
+
+---
+
 ## 專案定位
 
 「休校長小幫手」是一休減肥課程的 AI 教練助手 LINE Bot。
@@ -51,11 +62,11 @@
 ```
 lib/
   ai.js          ← SYSTEM_PROMPT（瘦身後 ~3.2K 字）+ handleMessage() + aiDetectQuestion() + generateDraftResponse()
-  knowledge.js   ← AI 意圖分類（classifyIntent，輸出 tags+mood+slices）+ 兩層式知識注入（Tier1 精華 + Tier2 x17，regex 降級備案）
+  knowledge.js   ← AI 意圖分類（classifyIntent，輸出 tags+mood+slices）+ 兩層式知識注入（Tier1 精華 + Tier2 x21，regex 降級備案）
   chat.js        ← 對話記憶（私訊 24hr TTL, max 40）+ 群組 buffer（2hr TTL, max 20）
   line.js        ← LINE API（驗簽 + reply + push + profile + groupSummary）
-  user.js        ← 用戶資料管理 + 自介偵測 + 預載入比對（含班別過濾）+ 班別選擇狀態管理
-  tags.js        ← 教練標籤系統（topic/emotion/core_issue/conversation_style + 趨勢摘要 + 旅程摘要）
+  user.js        ← 用戶資料管理 + 自介偵測 + 預載入比對（含班別過濾）+ 班別選擇狀態管理 + 目標系統（goals CRUD）
+  tags.js        ← 教練標籤系統（topic/emotion/core_issue/conversation_style/goal_action/goal_completed + 趨勢摘要 + 旅程摘要）
   supabase.js    ← Supabase client singleton
   pending.js     ← 群組問題待回應管理（Redis LIST, max 100）
 app/
@@ -73,7 +84,7 @@ app/
   api/admin/setup-menu/route.js ← Rich Menu 設定 API
   api/staff/classes/route.js   ← 班級管理 API（CRUD + 停課區間）
   api/staff/students/route.js  ← 學員狀態 API（含停課週數計算）
-  api/cron/smart-push/route.js ← 智慧推播 Cron（每天 15:00 台灣，沉默推播 + 課程進度）
+  api/cron/smart-push/route.js ← 智慧推播 Cron（三排程：週三課程/每天沉默/週四續報）+ 目標追蹤推播
 ```
 
 ## Redis 資料結構
@@ -90,6 +101,7 @@ coach:{userId}:journey        → 累積式旅程摘要（500-800 字）
 coach-pending:items           → 群組問題待回應（LIST, max 100）
 coach-pending-class:{userId}  → 等待選班的用戶（7天 TTL）
 coach-pending-verify:{userId} → 等待姓名確認（7天 TTL，含 selectedClass）
+coach-goal:{userId}           → 當前活躍目標（JSON，無 TTL）
 coach-push-log:{userId}       → 智慧推播紀錄（7天 TTL）
 coach-week-push:{userId}      → 課程週數推播紀錄（60天 TTL）
 ```
@@ -111,6 +123,7 @@ Redis 是快取，Supabase 是永久記憶。採用 **Read-through + Write-throu
 | `conversations` | 對話記錄 | user_id, role, content, created_at |
 | `coaching_tags` | 教練標籤 | user_id, topic, emotion, core_issue, progress_signal, created_at |
 | `milestones` | 里程碑 | user_id, milestone, created_at |
+| `goals` | 行動目標 | user_id, goal_text, context, status(active/completed/replaced), created_at, completed_at |
 
 ### Read-through 回補邏輯
 
@@ -133,7 +146,7 @@ Redis 是快取，Supabase 是永久記憶。採用 **Read-through + Write-throu
 
 ## 知識注入系統
 
-完整知識在 `lib/knowledge.js`，來源為 27 份課程筆記 + 代謝力重建實驗 Sessions 4-14。
+完整知識在 `lib/knowledge.js`，來源為 27 份課程筆記 + 代謝力重建實驗 Sessions 4-14 + 65 份班級對話紀錄（全部讀完）。
 
 **選取方式：AI 意圖分類（主要）+ regex 降級備案**
 - `classifyIntent()`：Gemini Flash Lite ~200 token，temperature 0.1
@@ -144,8 +157,14 @@ Redis 是快取，Supabase 是永久記憶。採用 **Read-through + Write-throu
 
 **Tier 1**（永遠注入 ~800 字元）：代謝重建 ABC、胰島素、菜肉飯順序、蛋白質、好油壞油、外食策略
 
-**Tier 2**（AI 選取，最多 2 塊，共 14 塊）：
-膽固醇 / 聚餐 / 肌少症 / 神經習慣 / 蛋白質警訊 / 外部評價 / 暴食心態 / 酒精睡眠 / 壓力進食 / 停滯期 / 隱藏碳水 / 運動恢復 / 代謝信任 / 營養科學
+**Tier 2**（AI 選取，最多 2 塊，共 21 塊）：
+膽固醇 / 聚餐 / 肌少症 / 神經習慣 / 蛋白質警訊 / 外部評價 / 暴食心態 / 酒精睡眠 / 壓力進食 / 停滯期 / 隱藏碳水 / 運動恢復 / 代謝信任 / 營養科學 / 便秘消化 / 瘦瘦針 / 體脂計體重 / 食物分類 / 外食搭配 / 經期飲食 / 澱粉補救
+
+**考考我題庫**：34 題食物分類測驗（7 大分類），在 webhook/route.js
+
+**目標系統**：對話中自然設定行動目標 → Supabase goals 表 + Redis 快取 → AI 追蹤 → Quick Reply 回報
+
+**核心原則**：80 分就很棒，不給營養師制式建議（GI 值、鈉含量、咖啡因間隔等），加法和選擇不是減法和控制
 
 更新流程：新課程筆記 → 更新課程知識總結.md → 更新 knowledge.js Tier2 → push main
 
