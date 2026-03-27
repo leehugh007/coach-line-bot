@@ -61,14 +61,16 @@ export default function DashboardPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const uid = params.get('u') || '';
+    const refresh = params.get('refresh') === '1';
     setUserId(uid);
-    if (uid) fetchDashboard(uid);
+    if (uid) fetchDashboard(uid, refresh);
     else { setLoading(false); setError('缺少用戶資訊'); }
   }, []);
 
-  const fetchDashboard = async (uid) => {
+  const fetchDashboard = async (uid, refresh = false) => {
     try {
-      const res = await fetch(`/api/dashboard?userId=${encodeURIComponent(uid)}`);
+      const url = `/api/dashboard?userId=${encodeURIComponent(uid)}${refresh ? '&refresh=1' : ''}`;
+      const res = await fetch(url);
       const json = await res.json();
       if (json.ok) setData(json);
       else setError(json.error || '載入失敗');
