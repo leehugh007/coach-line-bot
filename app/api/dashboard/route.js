@@ -4,9 +4,16 @@
  */
 
 import { NextResponse } from 'next/server';
+import { Redis } from '@upstash/redis';
 import { getSupabase } from '@/lib/supabase';
 import { FOOD_QUIZZES, QUIZ_LEVELS } from '@/lib/quiz-data';
 import { KNOWLEDGE_QUIZZES, KNOWLEDGE_LEVELS } from '@/lib/knowledge-quiz-data';
+
+let redis;
+function getRedis() {
+  if (!redis) redis = new Redis({ url: process.env.KV_REST_API_URL, token: process.env.KV_REST_API_TOKEN });
+  return redis;
+}
 
 function getLevel(levels, count) {
   let level = levels[0];
@@ -14,6 +21,72 @@ function getLevel(levels, count) {
     if (count >= l.min) level = l;
   }
   return `${level.title}`;
+}
+
+/**
+ * 生成「小幫手眼中的你」— 人格觀察，不是事實記錄
+ * 快取 7 天，只在 cache miss 時呼叫 Gemini
+ */
+async function getPortrait(userId, displayName, journey, progressRecords, emotionTrend) {
+  const r = getRedis();
+  const cacheKey = `coach-portrait:${userId}`;
+
+  // 查快取
+  const cached = await r.get(cacheKey);
+  if (cached) return cached;
+
+  // 沒有足夠資料就不生成
+  if (!journey && (!progressRecords || progressRecords.length === 0)) return null;
+
+  // 組合素材給 AI
+  const progressText = (progressRecords || []).slice(0, 5).map(p => p.detail).join('、');
+  const emotionText = (emotionTrend || []).slice(-10).map(e => e.emotion).join('→');
+
+  const prompt = `你是「休校長小幫手」，一位溫暖的 AI 教練助手。
+現在要幫學員寫一段「小幫手眼中的你」，這段文字會顯示在學員的個人頁面上。
+
+學員名字：${displayName}
+
+以下是你對這位學員的觀察素材：
+${journey ? `旅程紀錄：${journey.substring(0, 500)}` : ''}
+${progressText ? `進步紀錄：${progressText}` : ''}
+${emotionText ? `情緒變化：${emotionText}` : ''}
+
+規則：
+1. 用「你」稱呼學員，像跟朋友說話
+2. 重點寫「人格特質」：態度、用心、努力、面對問題的方式、成長的勇氣
+3. 不要寫具體數字（體脂率、天數、公斤數等）— 那些已經在其他地方顯示了
+4. 不要寫目標或飲食內容 — 只寫「你是什麼樣的人」
+5. 要讓學員看完覺得「原來小幫手是這樣看我的」，產生被理解的感覺
+6. 分 2-3 段，每段 1-2 句。總共 100-150 字
+7. 語氣溫暖但不浮誇，像一休說話的方式
+8. 最後一句帶一點鼓勵，但不要雞湯`;
+
+  try {
+    const key = process.env.GEMINI_API_KEY;
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=${key}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.7, maxOutputTokens: 300 },
+        }),
+      }
+    );
+    const data = await res.json();
+    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+
+    if (text) {
+      await r.set(cacheKey, text, { ex: 7 * 24 * 60 * 60 }); // 快取 7 天
+      return text;
+    }
+  } catch (err) {
+    console.error('[Portrait] Gemini error:', err.message);
+  }
+
+  return null;
 }
 
 export async function GET(request) {
@@ -82,10 +155,15 @@ export async function GET(request) {
       date: row.created_at,
     }));
 
+    const displayName = userRes.data?.display_name || '學員';
+
+    // 生成「小幫手眼中的你」（快取 7 天）
+    const portrait = await getPortrait(userId, displayName, userRes.data?.journey, progressRecords, emotionTrend);
+
     return NextResponse.json({
       ok: true,
       profile: {
-        displayName: userRes.data?.display_name || '學員',
+        displayName,
         className: userRes.data?.class_name || null,
         joinDate: userRes.data?.join_date,
       },
@@ -107,6 +185,7 @@ export async function GET(request) {
         totalConversations: convoCountRes.count || 0,
       },
       journey: userRes.data?.journey || null,
+      portrait,
       emotionTrend,
       progressRecords,
     });

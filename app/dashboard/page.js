@@ -94,7 +94,7 @@ export default function DashboardPage() {
   );
   if (!data) return null;
 
-  const { profile, quizProgress, knowledgeProgress, selfChecks, goals, milestones, stats, journey, emotionTrend, progressRecords } = data;
+  const { profile, quizProgress, knowledgeProgress, selfChecks, goals, milestones, stats, journey, portrait, emotionTrend, progressRecords } = data;
 
   // 加入天數
   const daysSinceJoin = profile.joinDate
@@ -129,15 +129,17 @@ export default function DashboardPage() {
 
         <div style={{ height: 8 }} />
 
-        {/* ── 小幫手眼中的你 ── */}
-        {journey && (
+        {/* ── 小幫手眼中的你（人格觀察） ── */}
+        {portrait && (
           <div style={{ ...S.card, background: '#f3f9f5', border: '1px solid rgba(42,157,111,0.2)' }}>
             <p style={{ fontSize: 12, color: '#2a9d6f', fontWeight: 600, margin: '0 0 10px' }}>
               小幫手眼中的你
             </p>
-            <p style={{ fontSize: 15, lineHeight: 1.8, color: '#2a2520', margin: 0 }}>
-              {journey.length > 350 ? journey.substring(0, 350) + '...' : journey}
-            </p>
+            {portrait.split('\n').filter(p => p.trim()).map((para, i) => (
+              <p key={i} style={{ fontSize: 15, lineHeight: 1.8, color: '#2a2520', margin: i === 0 ? 0 : '10px 0 0' }}>
+                {para}
+              </p>
+            ))}
           </div>
         )}
 
