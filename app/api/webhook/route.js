@@ -882,7 +882,7 @@ async function processBatchedMessages(userId, messages) {
  */
 async function backgroundTagProcessing(userId, userText, aiReply) {
   try {
-    const tags = await extractCoachingTags(userText, aiReply);
+    const tags = await extractCoachingTags(userText, aiReply, userId);
     if (!tags) return;
 
     const totalTopics = await saveCoachingTags(userId, tags);
