@@ -762,11 +762,43 @@ async function bufferAndSchedule(replyToken, userId, text) {
  * @param {string} userId
  * @param {Array<{text: string, replyToken: string}>} messages
  */
+// 客套話快速回覆（跳過所有 AI 呼叫，省 3 次 Gemini API）
+const QUICK_REPLIES = [
+  { pattern: /^(謝謝|感謝|謝啦|感恩|3Q|thx|thanks|thank you)[!！。~～♡❤️🙏]*$/i, replies: ['不客氣～有問題隨時問 😊', '不會！有需要再找我 💪', '別客氣～我都在 😊'] },
+  { pattern: /^(好的?|OK|ok|了解|收到|知道了|明白|懂了)[!！。~～👍]*$/i, replies: ['加油！💪', '有問題再問我～', '👍'] },
+  { pattern: /^(早安|午安|晚安|嗨|哈囉|hi|hello)[!！。~～☀️🌙]*$/i, replies: ['嗨～今天過得怎麼樣？', '你好呀～有什麼想聊的嗎？😊'] },
+];
+
+function getQuickReply(text) {
+  const trimmed = text.trim();
+  for (const { pattern, replies } of QUICK_REPLIES) {
+    if (pattern.test(trimmed)) {
+      return replies[Math.floor(Math.random() * replies.length)];
+    }
+  }
+  return null;
+}
+
 async function processBatchedMessages(userId, messages) {
   // 合併所有文字（用換行連接）
   const combinedText = messages.map(m => m.text).join('\n');
   // 用最後一條的 replyToken（最新的才有效）
   const lastReplyToken = messages[messages.length - 1].replyToken;
+
+  // === 客套話短路：省掉 3 次 Gemini API ===
+  const quickReply = getQuickReply(combinedText);
+  if (quickReply) {
+    console.log(`[QuickReply] ${userId?.substring(0, 8)}: "${combinedText}" → skip AI`);
+    await sendMessage(lastReplyToken, userId, quickReply);
+    // 仍記錄對話（讓歷史完整）+ 記錄互動
+    await Promise.all([
+      addChatMessage(userId, 'user', combinedText),
+      addChatMessage(userId, 'assistant', quickReply),
+      recordInteraction(userId),
+      recordStreak(userId).catch(() => {}),
+    ]);
+    return;
+  }
 
   try {
     // === 並行載入：對話歷史 + 用戶資料 + 心態摘要 + 旅程摘要 ===
