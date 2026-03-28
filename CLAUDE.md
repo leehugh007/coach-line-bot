@@ -1,7 +1,7 @@
 # 休校長小幫手 Bot — 專案上下文
 
 > 用途：讓 Claude Code 快速理解這個專案
-> 最後更新：2026-03-20
+> 最後更新：2026-03-28
 
 ## 強制驗證（踩坑後的硬規則，不可跳過）
 
@@ -28,9 +28,10 @@
 ## 技術架構
 
 - **框架**：Next.js 14（App Router）
-- **AI**：Gemini 3.1 Flash Lite（thinkingBudget: 1024）
+- **AI**：Gemini 3.1 Flash Lite（主對話 + 意圖分類）+ Gemini 2.5 Flash Lite（標籤 + 自介解析，thinkingBudget: 0）
 - **記憶**：Upstash Redis（快取層）+ Supabase（永久層，Read-through 回補）
 - **知識**：knowledge.js AI 意圖分類 + 兩層式注入（Tier1 精華 + Tier2 AI 選取 21 塊，regex 降級備案）
+- **遊戲化**：食物分類測驗（163 題）+ 瘦身知識大挑戰（245 題）+ 健康存摺（streak）+ 學員 Dashboard
 - **部署**：Vercel（push main = 自動部署）
 - **LINE**：Messaging API（Reply 優先，Push fallback）
 
@@ -61,20 +62,30 @@
 
 ```
 lib/
-  ai.js          ← SYSTEM_PROMPT（瘦身後 ~3.2K 字）+ handleMessage() + aiDetectQuestion() + generateDraftResponse()
-  knowledge.js   ← AI 意圖分類（classifyIntent，輸出 tags+mood+slices）+ 兩層式知識注入（Tier1 精華 + Tier2 x21，regex 降級備案）
-  chat.js        ← 對話記憶（私訊 24hr TTL, max 40）+ 群組 buffer（2hr TTL, max 20）
-  line.js        ← LINE API（驗簽 + reply + push + profile + groupSummary）
-  user.js        ← 用戶資料管理 + 自介偵測 + 預載入比對（含班別過濾）+ 班別選擇狀態管理 + 目標系統（goals CRUD）
-  tags.js        ← 教練標籤系統（topic/emotion/core_issue/conversation_style/goal_action/goal_completed + 趨勢摘要 + 旅程摘要）
-  supabase.js    ← Supabase client singleton
-  pending.js     ← 群組問題待回應管理（Redis LIST, max 100）
+  ai.js                ← SYSTEM_PROMPT（~3.2K 字）+ handleMessage() + aiDetectQuestion() + generateDraftResponse()
+  knowledge.js         ← AI 意圖分類（classifyIntent，輸出 tags+mood+slices）+ 兩層式知識注入（Tier1 精華 + Tier2 x21）
+  chat.js              ← 對話記憶（私訊 24hr TTL, max 40）+ 群組 buffer（2hr TTL, max 20）
+  line.js              ← LINE API（驗簽 + reply + push + profile + groupSummary）
+  user.js              ← 用戶資料管理 + 自介偵測 + 預載入比對（含班別過濾）+ 班別選擇 + 目標系統 + 健康存摺（streak）
+  tags.js              ← 教練標籤系統（topic/emotion/core_issue/conversation_style/goal_action/goal_completed + 趨勢摘要 + 旅程摘要）
+  supabase.js          ← Supabase client singleton
+  pending.js           ← 群組問題待回應管理（Redis LIST, max 100）
+  queue.js             ← 私訊訊息合併（Redis buffer + 40 秒延遲窗口，防連發多則被拆成多次回覆）
+  cost-tracker.js      ← Gemini API 花費追蹤（per-user token 用量 + 成本估算）
+  quiz-data.js         ← 食物分類測驗題庫（163 題，7 大分類，4 等級收集系統）
+  knowledge-quiz-data.js ← 瘦身知識大挑戰題庫（245 題是非題，6 分類 × 3 難度）
 app/
-  admin/page.js            ← 管理後台（群組監控 + 手動草稿 + 匯入）
-  admin/students/page.js   ← 學員管理（列表 + 快捷分班 + 搜尋 + 對話紀錄 + 標籤）
-  staff/page.js            ← 助教後台（學員狀態 + 主動關心 + 班級管理 + 名單上傳）
-  guide/page.js            ← 飲食指南網頁（7 個分類）
-  api/webhook/route.js     ← 主入口（maxDuration=60，含私訊合併 + 加好友先選班 + 班別比對）
+  page.js                      ← 根頁面
+  admin/page.js                ← 管理後台（群組監控 + 手動草稿 + 匯入）
+  admin/students/page.js       ← 學員管理（列表 + 快捷分班 + 搜尋 + 對話紀錄 + 標籤）
+  staff/page.js                ← 助教後台（學員狀態 + 主動關心 + 班級管理 + 名單上傳）
+  guide/page.js                ← 飲食指南網頁（7 個分類）
+  dashboard/page.js            ← 學員個人 Dashboard（Portrait + 情緒趨勢 + 進步紀錄 + 收集進度 + 目標 + 里程碑）
+  quiz/page.js                 ← 食物分類測驗（收集系統，4 等級）
+  quiz/history/page.js         ← 食物測驗歷史
+  knowledge/page.js            ← 瘦身知識大挑戰（245 題是非題）
+  knowledge/history/page.js    ← 知識挑戰歷史
+  api/webhook/route.js         ← 主入口（maxDuration=60，含私訊合併 + 加好友先選班 + 班別比對）
   api/admin/pending/route.js   ← 待回應 API
   api/admin/import/route.js    ← 學員匯入 API
   api/admin/users/route.js     ← 學員列表 API
@@ -82,6 +93,12 @@ app/
   api/admin/outreach/route.js  ← 主動關心推播 API（支援 admin + staff key）
   api/admin/students/route.js  ← 學員管理 API（更新 class_name）
   api/admin/setup-menu/route.js ← Rich Menu 設定 API
+  api/admin/draft/route.js     ← 手動生成草稿 API
+  api/admin/cleanup/route.js   ← 資料清理 API
+  api/admin/reset-user/route.js ← 用戶資料重置 API（清除單一用戶 Redis 14 key + Supabase 8 表）
+  api/dashboard/route.js       ← 學員 Dashboard API（Portrait AI 人格觀察 + 情緒趨勢 + 進步紀錄）
+  api/quiz/route.js            ← 食物分類測驗 API
+  api/knowledge/route.js       ← 瘦身知識大挑戰 API
   api/staff/classes/route.js   ← 班級管理 API（CRUD + 停課區間）
   api/staff/students/route.js  ← 學員狀態 API（含停課週數計算）
   api/cron/smart-push/route.js ← 智慧推播 Cron（三排程：週三課程/每天沉默/週四續報）+ 目標追蹤推播
@@ -90,20 +107,29 @@ app/
 ## Redis 資料結構
 
 ```
-coach-chat:{userId}           → 私訊對話記憶（24hr TTL, max 40 則）
-coach-group:{groupId}         → 群組訊息 buffer（2hr TTL, max 20 則）
-coach-user:{userId}           → 用戶資料（自介、互動次數）
-coach-preloaded:{lineName}    → 預載入學員自介
-coach:{userId}:topics         → 對話標籤（max 20）
-coach:{userId}:milestones     → 里程碑（Set）
-coach:{userId}:summary        → AI 心態摘要
-coach:{userId}:journey        → 累積式旅程摘要（500-800 字）
-coach-pending:items           → 群組問題待回應（LIST, max 100）
-coach-pending-class:{userId}  → 等待選班的用戶（7天 TTL）
-coach-pending-verify:{userId} → 等待姓名確認（7天 TTL，含 selectedClass）
-coach-goal:{userId}           → 當前活躍目標（JSON，無 TTL）
-coach-push-log:{userId}       → 智慧推播紀錄（7天 TTL）
-coach-week-push:{userId}      → 課程週數推播紀錄（60天 TTL）
+coach-chat:{userId}            → 私訊對話記憶（24hr TTL, max 40 則）
+coach-group:{groupId}          → 群組訊息 buffer（2hr TTL, max 20 則）
+coach-user:{userId}            → 用戶資料（自介、互動次數）
+coach-buf:{userId}             → 私訊合併 buffer（40 秒窗口，queue.js）
+coach:{userId}:topics          → 對話標籤（max 20）
+coach:{userId}:milestones      → 里程碑（Set）
+coach:{userId}:summary         → AI 心態摘要
+coach:{userId}:journey         → 累積式旅程摘要（500-800 字）
+coach-goal:{userId}            → 當前活躍目標（JSON，無 TTL）
+coach-streak:{userId}          → 健康存摺連續天數
+coach-pending:items            → 群組問題待回應（LIST, max 100）
+coach-pending-class:{userId}   → 等待選班的用戶（7天 TTL）
+coach-pending-verify:{userId}  → 等待姓名確認（7天 TTL，含 selectedClass）
+coach-preload:{lineName}       → 預載入學員自介（正規化名稱）
+coach-preload:__index          → SET：所有已匯入的正規化名稱
+coach-preload-name:{realName}  → 真實姓名對應（重名時用）
+coach-preload:__dupes          → SET：有重名的正規化名稱
+coach-class:{className}        → 班級資料
+coach-classes-index            → SET：所有班級名稱
+coach-push-log:{userId}        → 智慧推播紀錄（1天冷卻）
+coach-week-push:{userId}       → 課程週數推播紀錄（60天 TTL）
+coach-portrait:{userId}        → Dashboard AI 人格觀察快取（7天 TTL）
+coach-portrait-ver:{userId}    → Portrait 版本比對
 ```
 
 注意：Redis 實例與幫你算 Bot 共用，但 key prefix 不同（`coach-` vs `chat:`/`user:`）。
@@ -119,11 +145,17 @@ Redis 是快取，Supabase 是永久記憶。採用 **Read-through + Write-throu
 
 | 表 | 用途 | 關鍵欄位 |
 |---|------|----------|
-| `users` | 用戶檔案 | id, display_name, intro, goal, week_number, journey, join_date, updated_at |
+| `users` | 用戶檔案 | id, display_name, intro, goal, week_number, journey, class_name, last_group_activity, join_date, updated_at |
 | `conversations` | 對話記錄 | user_id, role, content, created_at |
-| `coaching_tags` | 教練標籤 | user_id, topic, emotion, core_issue, progress_signal, created_at |
+| `coaching_tags` | 教練標籤 | user_id, topic, emotion, core_issue, progress_signal, progress_detail, created_at |
 | `milestones` | 里程碑 | user_id, milestone, created_at |
 | `goals` | 行動目標 | user_id, goal_text, context, status(active/completed/replaced), created_at, completed_at |
+| `coach_quiz_collected` | 食物測驗已收集 | user_id, food, correct, created_at |
+| `coach_quiz_sessions` | 食物測驗作答紀錄 | user_id, score, total, created_at |
+| `coach_knowledge_collected` | 知識挑戰已收集 | user_id, question_index, correct, created_at |
+| `coach_knowledge_sessions` | 知識挑戰作答紀錄 | user_id, score, total, created_at |
+| `abc_self_checks` | 自我覺察紀錄 | user_id, check_date, ... |
+| `abc_api_usage` | Gemini API 花費 | user_id, action, model, tokens, cost, created_at |
 
 ### Read-through 回補邏輯
 
@@ -160,9 +192,23 @@ Redis 是快取，Supabase 是永久記憶。採用 **Read-through + Write-throu
 **Tier 2**（AI 選取，最多 2 塊，共 21 塊）：
 膽固醇 / 聚餐 / 肌少症 / 神經習慣 / 蛋白質警訊 / 外部評價 / 暴食心態 / 酒精睡眠 / 壓力進食 / 停滯期 / 隱藏碳水 / 運動恢復 / 代謝信任 / 營養科學 / 便秘消化 / 瘦瘦針 / 體脂計體重 / 食物分類 / 外食搭配 / 經期飲食 / 澱粉補救
 
-**考考我題庫**：34 題食物分類測驗（7 大分類），在 webhook/route.js
+**食物分類測驗**：178 題（quiz-data.js），8 大分類，4 等級收集系統（食物新手→食物博士），優先出新題
+
+**瘦身知識大挑戰**：270 題是非題（knowledge-quiz-data.js），6 分類（迷思/營養/行為/食物科學/ABC代謝/心態）× 3 難度（tier 1-3），零 token 消耗
 
 **目標系統**：對話中自然設定行動目標 → Supabase goals 表 + Redis 快取 → AI 追蹤 → Quick Reply 回報
+
+**健康存摺**：streak 追蹤（連續互動天數）+ 食物知識收集進度 + 目標完成紀錄 + 身體變化紀錄
+
+**學員 Dashboard**（/dashboard）：
+- Portrait（小幫手眼中的你）：Gemini Flash Lite 生成 AI 人格觀察，Redis 7 天快取
+- 情緒趨勢：coaching_tags 最近 20 筆的情緒色點時間軸
+- 進步紀錄：AI 從對話中偵測到的真實改變
+- 食物/知識收集進度條 + 等級
+- 行動目標（active/completed）+ 里程碑清單
+- Rich Menu「我的進步」→ 回傳 Dashboard 連結
+
+**Gemini API 花費追蹤**（cost-tracker.js）：per-user token 用量記錄 + 成本估算，支援 3.1 Flash Lite / 2.5 Flash Lite / 2.5 Flash
 
 **核心原則**：80 分就很棒，不給營養師制式建議（GI 值、鈉含量、咖啡因間隔等），加法和選擇不是減法和控制
 
