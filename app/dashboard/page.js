@@ -337,7 +337,7 @@ export default function DashboardPage() {
                     width: 22, height: 22, borderRadius: 11, background: '#2a9d6f', color: 'white',
                     fontSize: 11, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
                   }}>✓</div>
-                  <span style={{ fontSize: 14, color: '#2a2520', flex: 1 }}>{formatMilestone(m.milestone)}</span>
+                  <span style={{ fontSize: 14, color: '#2a2520', flex: 1 }}>{m.content || formatMilestone(m.milestone) || '里程碑'}</span>
                   <span style={{ fontSize: 11, color: '#a8a29e' }}>{formatDate(m.created_at)}</span>
                 </div>
               ))}

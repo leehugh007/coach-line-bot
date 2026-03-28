@@ -42,9 +42,12 @@ async function getPortrait(userId, { displayName, journey, progressRecords, emot
     if (cached) return cached;
   }
 
-  // 素材不夠就不生成
-  if (!journey && (!progressRecords || progressRecords.length === 0) && (!emotionTrend || emotionTrend.length === 0)) {
-    return null;
+  // 素材不夠就不生成（防止 AI 腦補）
+  // 需要：journey 存在（>= 10 次對話才會產生）或至少 5 筆標籤
+  const hasJourney = journey && journey.length > 50;
+  const hasEnoughTags = emotionTrend && emotionTrend.length >= 5;
+  if (!hasJourney && !hasEnoughTags) {
+    return '多聊幾次，小幫手就能更認識你 😊\n目前對話還不夠多，等我們更熟一些，這裡會出現小幫手對你的真實觀察。';
   }
 
   // ── 組合完整素材 ──
@@ -210,7 +213,7 @@ export async function GET(request) {
       sb.from('coach_knowledge_collected').select('question_index').eq('user_id', userId),
       sb.from('abc_self_checks').select('*').eq('user_id', userId).order('check_date', { ascending: false }).limit(7),
       sb.from('goals').select('goal_text, status, completed_at, created_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(10),
-      sb.from('milestones').select('milestone, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
+      sb.from('milestones').select('content, type, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
       sb.from('conversations').select('id', { count: 'exact', head: true }).eq('user_id', userId),
       sb.from('conversations').select('created_at').eq('user_id', userId),
       // 情緒趨勢：最近 20 筆 coaching_tags
