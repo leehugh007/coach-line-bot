@@ -72,8 +72,8 @@ lib/
   pending.js           ← 群組問題待回應管理（Redis LIST, max 100）
   queue.js             ← 私訊訊息合併（Redis buffer + 40 秒延遲窗口，防連發多則被拆成多次回覆）
   cost-tracker.js      ← Gemini API 花費追蹤（per-user token 用量 + 成本估算）
-  quiz-data.js         ← 食物分類測驗題庫（163 題，7 大分類，4 等級收集系統）
-  knowledge-quiz-data.js ← 瘦身知識大挑戰題庫（245 題是非題，6 分類 × 3 難度）
+  quiz-data.js         ← 食物分類測驗題庫（178 題，8 大分類，4 等級收集系統）
+  knowledge-quiz-data.js ← 瘦身知識大挑戰題庫（270 題是非題，6 分類 × 3 難度）
 app/
   page.js                      ← 根頁面
   admin/page.js                ← 管理後台（群組監控 + 手動草稿 + 匯入）
@@ -83,8 +83,10 @@ app/
   dashboard/page.js            ← 學員個人 Dashboard（Portrait + 情緒趨勢 + 進步紀錄 + 收集進度 + 目標 + 里程碑）
   quiz/page.js                 ← 食物分類測驗（收集系統，4 等級）
   quiz/history/page.js         ← 食物測驗歷史
-  knowledge/page.js            ← 瘦身知識大挑戰（245 題是非題）
+  knowledge/page.js            ← 瘦身知識大挑戰（270 題是非題）
   knowledge/history/page.js    ← 知識挑戰歷史
+  check/page.js                ← 自我覺察表單（5 指標 × 5 級距，abc_self_checks 表）
+  check/history/page.js        ← 自我覺察趨勢頁
   api/webhook/route.js         ← 主入口（maxDuration=60，含私訊合併 + 加好友先選班 + 班別比對）
   api/admin/pending/route.js   ← 待回應 API
   api/admin/import/route.js    ← 學員匯入 API
@@ -97,6 +99,7 @@ app/
   api/admin/cleanup/route.js   ← 資料清理 API
   api/admin/reset-user/route.js ← 用戶資料重置 API（清除單一用戶 Redis 14 key + Supabase 8 表）
   api/dashboard/route.js       ← 學員 Dashboard API（Portrait AI 人格觀察 + 情緒趨勢 + 進步紀錄）
+  api/check/route.js           ← 自我覺察 API（POST 儲存 / GET 歷史，abc_self_checks 表）
   api/quiz/route.js            ← 食物分類測驗 API
   api/knowledge/route.js       ← 瘦身知識大挑戰 API
   api/staff/classes/route.js   ← 班級管理 API（CRUD + 停課區間）
@@ -155,7 +158,7 @@ Redis 是快取，Supabase 是永久記憶。採用 **Read-through + Write-throu
 | `coach_knowledge_collected` | 知識挑戰已收集 | user_id, question_index, correct, created_at |
 | `coach_knowledge_sessions` | 知識挑戰作答紀錄 | user_id, score, total, created_at |
 | `abc_self_checks` | 自我覺察紀錄 | user_id, check_date, ... |
-| `abc_api_usage` | Gemini API 花費 | user_id, action, model, tokens, cost, created_at |
+| `abc_api_usage` | Gemini API 花費 | user_id, call_type, model, input_tokens, output_tokens, thinking_tokens, total_tokens, cost_twd, bot, created_at |
 
 ### Read-through 回補邏輯
 
@@ -208,7 +211,7 @@ Redis 是快取，Supabase 是永久記憶。採用 **Read-through + Write-throu
 - 行動目標（active/completed）+ 里程碑清單
 - Rich Menu「我的進步」→ 回傳 Dashboard 連結
 
-**Gemini API 花費追蹤**（cost-tracker.js）：per-user token 用量記錄 + 成本估算，支援 3.1 Flash Lite / 2.5 Flash Lite / 2.5 Flash
+**Gemini API 花費追蹤**（cost-tracker.js）：per-user token 用量記錄 + 成本估算，支援 gemini-3-flash-preview / gemini-3.1-flash-lite-preview / gemini-2.5-flash-lite / gemini-2.5-flash。所有 Gemini API 呼叫皆追蹤（ai.js 3 處 + knowledge.js 1 處 + tags.js 3 處 + user.js 1 處）
 
 **核心原則**：80 分就很棒，不給營養師制式建議（GI 值、鈉含量、咖啡因間隔等），加法和選擇不是減法和控制
 
