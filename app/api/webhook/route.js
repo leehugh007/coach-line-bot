@@ -11,6 +11,7 @@
  */
 
 import { FOOD_QUIZZES, QUIZ_LEVELS as QUIZ_LEVELS_DATA } from '@/lib/quiz-data';
+import { KNOWLEDGE_QUIZZES, KNOWLEDGE_LEVELS } from '@/lib/knowledge-quiz-data';
 import { verifySignature, sendMessage, pushMessage, replyWithQuickReply, getProfile, getGroupMemberProfile, getGroupSummary } from '@/lib/line';
 import { handleMessage, basicMessageFilter, aiDetectQuestion, generateDraftResponse } from '@/lib/ai';
 import { getChatHistory, addChatMessage, formatChatForGemini, addGroupMessage, getGroupContext } from '@/lib/chat';
@@ -574,10 +575,109 @@ async function bufferAndSchedule(replyToken, userId, text) {
     return { title: '食物新手 🌱', nextText: '', isMax: false };
   }
 
-  // === 瘦身知識大挑戰：網頁版是非題測驗 ===
+  // === 瘦身知識大挑戰：網頁版（10 題一組） ===
   if (trimmed === '#瘦身知識大挑戰' || trimmed === '#知識大挑戰' || trimmed === '瘦身知識大挑戰' || trimmed === '知識大挑戰') {
     const knowledgeUrl = `https://coach-line-bot.vercel.app/knowledge?u=${userId}`;
     return await sendMessage(replyToken, userId, `🧠 瘦身知識大挑戰\n\n10 題是非題，判斷瘦身觀念是對是錯！\n打破迷思、建立正確知識 💪\n\n👉 ${knowledgeUrl}`);
+  }
+
+  // === 瘦身知識是非題（對話內，單題，零 token） ===
+  function getKnowledgeLevel(count) {
+    for (let i = KNOWLEDGE_LEVELS.length - 1; i >= 0; i--) {
+      if (count >= KNOWLEDGE_LEVELS[i].min) return KNOWLEDGE_LEVELS[i];
+    }
+    return KNOWLEDGE_LEVELS[0];
+  }
+
+  const knowledgeAnswerMatch = trimmed.match(/^知識答：(\d+)→(對|錯)$/);
+  if (knowledgeAnswerMatch) {
+    const [, idxStr, ans] = knowledgeAnswerMatch;
+    const idx = parseInt(idxStr, 10);
+    const q = KNOWLEDGE_QUIZZES[idx];
+    if (q) {
+      const userSaidTrue = ans === '對';
+      const isCorrect = userSaidTrue === q.answer;
+
+      // 寫入 Supabase
+      try {
+        const { getSupabase } = await import('@/lib/supabase');
+        const sb = getSupabase();
+        if (sb && isCorrect) {
+          await sb.from('coach_knowledge_collected').upsert(
+            { user_id: userId, question_index: idx },
+            { onConflict: 'user_id,question_index' }
+          );
+        }
+      } catch (e) { console.error('[KnowledgeQuiz] Save error:', e); }
+
+      // 計算收集數
+      let collected = 0;
+      try {
+        const { getSupabase } = await import('@/lib/supabase');
+        const sb = getSupabase();
+        if (sb) {
+          const { data } = await sb.from('coach_knowledge_collected').select('question_index').eq('user_id', userId);
+          collected = data?.length || 0;
+        }
+      } catch (_) {}
+
+      const level = getKnowledgeLevel(collected);
+      const correctEmoji = q.answer ? '⭕ 對' : '❌ 錯';
+      const feedback = isCorrect
+        ? `答對了！🎉\n\n「${q.statement}」→ ${correctEmoji}\n\n${q.explain}\n\n📊 已掌握 ${collected} 個知識點（${level.emoji} ${level.title}）`
+        : `答錯了，但學到了！😄\n\n「${q.statement}」→ ${correctEmoji}\n\n${q.explain}\n\n📊 已掌握 ${collected} 個知識點（${level.emoji} ${level.title}）`;
+
+      return await replyWithQuickReply(replyToken, feedback, [
+        { label: '再來一題', text: `再考我一題知識，不要${idx}` },
+        { label: '換玩食物分類', text: '考考我食物分類' },
+      ]);
+    }
+  }
+
+  // 考考我瘦身知識：出一題是非題
+  const knowledgeTriggerMatch = trimmed.match(/^再考我一題知識[，,]不要(\d+)$/);
+  if (trimmed === '考考我瘦身知識' || knowledgeTriggerMatch) {
+    const excludeIdx = knowledgeTriggerMatch ? parseInt(knowledgeTriggerMatch[1], 10) : null;
+
+    // 讀已答對的題目
+    let answeredSet = new Set();
+    try {
+      const { getSupabase } = await import('@/lib/supabase');
+      const sb = getSupabase();
+      if (sb) {
+        const { data } = await sb.from('coach_knowledge_collected').select('question_index').eq('user_id', userId);
+        answeredSet = new Set((data || []).map(r => r.question_index));
+      }
+    } catch (_) {}
+
+    const collected = answeredSet.size;
+    const level = getKnowledgeLevel(collected);
+
+    // 建題池：排除上一題，優先出沒答對過的
+    let pool = KNOWLEDGE_QUIZZES.map((q, i) => ({ ...q, _idx: i }));
+    if (excludeIdx !== null) pool = pool.filter(q => q._idx !== excludeIdx);
+    const unseen = pool.filter(q => !answeredSet.has(q._idx));
+    const pickFrom = unseen.length > 0 ? unseen : pool;
+    const pick = pickFrom[Math.floor(Math.random() * pickFrom.length)];
+
+    const cat = KNOWLEDGE_QUIZZES[pick._idx]?.category || '';
+    const catInfo = [
+      { id: 'myth', emoji: '💡' }, { id: 'abc', emoji: '🔥' },
+      { id: 'nutrition', emoji: '🥗' }, { id: 'mindset', emoji: '🧠' },
+      { id: 'behavior', emoji: '🎯' }, { id: 'food_science', emoji: '🔬' },
+    ].find(c => c.id === cat);
+    const catEmoji = catInfo?.emoji || '🧠';
+
+    const intro = collected === 0
+      ? `${catEmoji} 是非題來囉！`
+      : `已掌握 ${collected} 個知識點（${level.emoji} ${level.title}）\n\n${catEmoji} 是非題來囉！`;
+
+    return await replyWithQuickReply(replyToken, `${intro}\n\n「${pick.statement}」\n\n這句話是對還是錯？`, [
+      { label: '⭕ 對', text: `知識答：${pick._idx}→對` },
+      { label: '❌ 錯', text: `知識答：${pick._idx}→錯` },
+      { label: '換一題', text: `再考我一題知識，不要${pick._idx}` },
+      { label: '換玩食物分類', text: '考考我食物分類' },
+    ]);
   }
 
   // === 食物大挑戰：網頁版測驗遊戲 ===
@@ -622,9 +722,17 @@ async function bufferAndSchedule(replyToken, userId, text) {
     ]);
   }
 
-  // === 考考我：隨機食物分類測驗（支援排除上一題 + 優先出沒答過的） ===
+  // === 考考我：選擇遊戲 ===
+  if (trimmed === '考考我') {
+    return await replyWithQuickReply(replyToken, '今天想玩哪個？😄', [
+      { label: '🍽️ 食物分類', text: '考考我食物分類' },
+      { label: '🧠 瘦身知識', text: '考考我瘦身知識' },
+    ]);
+  }
+
+  // === 考考我食物分類：隨機食物分類測驗（支援排除上一題 + 優先出沒答過的） ===
   const quizTriggerMatch = trimmed.match(/^再考我一題食物分類[，,]不要(.+)$/);
-  if (trimmed === '考考我食物分類' || trimmed === '考考我' || trimmed === '再考我一題食物分類' || quizTriggerMatch) {
+  if (trimmed === '考考我食物分類' || trimmed === '再考我一題食物分類' || quizTriggerMatch) {
     const excludeFood = quizTriggerMatch ? quizTriggerMatch[1] : null;
     const r = (await import('@upstash/redis')).Redis;
     const redis = new r({ url: process.env.KV_REST_API_URL, token: process.env.KV_REST_API_TOKEN });
