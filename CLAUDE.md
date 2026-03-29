@@ -28,7 +28,7 @@
 ## 技術架構
 
 - **框架**：Next.js 14（App Router）
-- **AI**：Gemini 3.1 Flash Lite（主對話 + 意圖分類）+ Gemini 2.5 Flash Lite（標籤 + 自介解析，thinkingBudget: 0）
+- **AI**：Gemini 3.1 Flash Lite（主對話）+ Gemini 2.5 Flash Lite（意圖分類 + 群組偵測 + 標籤 + 自介解析，thinkingBudget: 0）
 - **記憶**：Upstash Redis（快取層）+ Supabase（永久層，Read-through 回補）
 - **知識**：knowledge.js AI 意圖分類 + 兩層式注入（Tier1 精華 + Tier2 AI 選取 21 塊，regex 降級備案）
 - **遊戲化**：食物分類測驗（163 題）+ 瘦身知識大挑戰（245 題）+ 健康存摺（streak）+ 學員 Dashboard
@@ -214,6 +214,12 @@ Redis 是快取，Supabase 是永久記憶。採用 **Read-through + Write-throu
 **Gemini API 花費追蹤**（cost-tracker.js）：per-user token 用量記錄 + 成本估算，支援 gemini-3-flash-preview / gemini-3.1-flash-lite-preview / gemini-2.5-flash-lite / gemini-2.5-flash。所有 Gemini API 呼叫皆追蹤（ai.js 3 處 + knowledge.js 1 處 + tags.js 3 處 + user.js 1 處）
 
 **核心原則**：80 分就很棒，不給營養師制式建議（GI 值、鈉含量、咖啡因間隔等），加法和選擇不是減法和控制
+
+**成本優化機制（2026-03-29）**：
+- **客套話快速回覆**：「謝謝/好/收到/早安/哈哈/讚/emoji」→ 固定回覆跳過所有 AI（省 3 次 API/次），pattern 在 route.js QUICK_REPLIES
+- **智慧截斷對話歷史**：chatHistory > 6 則時，最近 3 輪完整保留，更早的壓成一行摘要（省 ~30% input tokens）
+- **旅程摘要每日限頻**：shouldUpdateJourney 加台灣時間每天最多 1 次（Redis key: `coach-journey-updated:{userId}`，TTL 48hr）
+- **模型降級**：群組偵測 + 意圖分類改用 gemini-2.5-flash-lite（分類任務不需要 3.1-Lite，省 ~73%）
 
 更新流程：新課程筆記 → 更新課程知識總結.md → 更新 knowledge.js Tier2 → push main
 
