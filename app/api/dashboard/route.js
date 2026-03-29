@@ -35,152 +35,149 @@ function getLevel(levels, count) {
 async function getPortrait(userId, { displayName, journey, progressRecords, emotionTrend, goals, milestones, selfChecks, stats, quizCollected, knowledgeCollected }, forceRefresh = false) {
   const r = getRedis();
   const cacheKey = `coach-portrait:${userId}`;
+  const PORTRAIT_TTL = 14 * 24 * 60 * 60; // 2 週快取
 
-  // 查快取（7 天 TTL），forceRefresh 可強制重新生成
+  // 查快取（2 週 TTL），forceRefresh 可強制重新生成
   if (!forceRefresh) {
     const cached = await r.get(cacheKey);
     if (cached) return cached;
   }
 
-  // 素材不夠就不生成（防止 AI 腦補）
-  // 需要：journey 存在（>= 10 次對話才會產生）或至少 5 筆標籤
-  const hasJourney = journey && journey.length > 50;
-  const hasEnoughTags = emotionTrend && emotionTrend.length >= 5;
-  if (!hasJourney && !hasEnoughTags) {
-    return '多聊幾次，小幫手就能更認識你 😊\n目前對話還不夠多，等我們更熟一些，這裡會出現小幫手對你的真實觀察。';
+  // 素材門檻：至少 30 次對話才生成（要夠了解才寫得出有溫度的觀察）
+  if (stats.totalConversations < 30) {
+    return '多聊幾次，小幫手就能更認識你 😊\n目前我們還在熟悉彼此，等對話再多一些，這裡會出現我對你的真實觀察。';
   }
 
-  // ── 組合完整素材 ──
+  // ── 拉學員原始對話（最重要的素材來源）──
+  let userQuotes = [];
+  try {
+    const sb = getSupabase();
+    if (sb) {
+      const { data: convos } = await sb
+        .from('conversations')
+        .select('content')
+        .eq('user_id', userId)
+        .eq('role', 'user')
+        .order('created_at', { ascending: false })
+        .limit(200);
 
-  // 把「學員」「學生」「這位學員」替換成名字（journey 和 progress 裡的稱呼問題）
-  const fixName = (text) => text.replace(/這位學員|學員|學生/g, displayName);
+      if (convos) {
+        // 篩選有意義的訊息：>20字、不是純客套話
+        const skipPattern = /^(好|OK|ok|謝謝|感謝|收到|了解|嗯嗯|早安|午安|晚安|哈哈|讚|👍|❤️|💪|可以|好的|對|是)[!！。~～]*$/i;
+        userQuotes = convos
+          .map(c => c.content)
+          .filter(t => t && t.length > 20 && !skipPattern.test(t.trim()))
+          .slice(0, 30) // 取最多 30 則有意義的
+          .map(t => t.substring(0, 150)); // 每則截取 150 字
+      }
+    }
+  } catch (err) {
+    console.error('[Portrait] Fetch conversations error:', err.message);
+  }
 
-  // 旅程（AI 已整理的完整故事）
-  const journeyBlock = journey ? `【旅程紀錄】\n${fixName(journey)}` : '';
+  // ── 組合素材 ──
+  const fixName = (text) => text?.replace(/這位學員|學員|學生/g, displayName) || '';
 
-  // 進步紀錄（AI 從對話中偵測到的真實改變）
+  // 核心素材：學員自己說過的話
+  const quotesBlock = userQuotes.length > 0
+    ? `【${displayName}說過的話（原文，最重要的素材）】\n${userQuotes.map(q => `「${q}」`).join('\n')}`
+    : '';
+
+  // 背景素材
+  const journeyBlock = journey ? `【旅程背景】\n${fixName(journey).substring(0, 400)}` : '';
   const progressBlock = (progressRecords || []).length > 0
-    ? `【進步紀錄】\n${progressRecords.slice(0, 8).map(p => `- ${fixName(p.detail)}`).join('\n')}`
+    ? `【做到的改變】\n${progressRecords.slice(0, 5).map(p => `- ${fixName(p.detail)}`).join('\n')}`
     : '';
+  const statsBlock = `【互動】活躍 ${stats.activeDays} 天、對話 ${stats.totalConversations} 次`;
 
-  // 情緒變化軌跡
-  const emotionBlock = (emotionTrend || []).length >= 3
-    ? `【情緒變化】\n${emotionTrend.map(e => e.emotion).join(' → ')}`
-    : '';
-
-  // 目標（設定過什麼、完成了什麼）
-  const activeGoals = (goals || []).filter(g => g.status === 'active');
-  const completedGoals = (goals || []).filter(g => g.status === 'completed');
-  const goalBlock = (goals || []).length > 0
-    ? `【目標】\n${activeGoals.map(g => `進行中：${g.goal_text}`).join('\n')}${completedGoals.length > 0 ? `\n已完成 ${completedGoals.length} 個目標` : ''}`
-    : '';
-
-  // 里程碑
-  const milestoneBlock = (milestones || []).length > 0
-    ? `【里程碑】\n已達成：${milestones.map(m => m.milestone).join('、')}`
-    : '';
-
-  // 自我覺察趨勢
-  const checkBlock = (selfChecks || []).length > 0
-    ? `【自我覺察】\n最近分數：${selfChecks.slice(0, 5).map(c => c.total_score).join(' → ')}（滿分 25）`
-    : '';
-
-  // 學習投入
-  const learningBlock = (quizCollected > 0 || knowledgeCollected > 0)
-    ? `【學習投入】\n食物知識：認識 ${quizCollected} 種、瘦身知識：答對 ${knowledgeCollected} 題`
-    : '';
-
-  // 互動統計
-  const statsBlock = `【互動】\n活躍 ${stats.activeDays} 天、對話 ${stats.totalConversations} 次`;
-
-  const materials = [journeyBlock, progressBlock, emotionBlock, goalBlock, milestoneBlock, checkBlock, learningBlock, statsBlock]
-    .filter(Boolean).join('\n\n');
+  const materials = [quotesBlock, progressBlock, journeyBlock, statsBlock].filter(Boolean).join('\n\n');
 
   const prompt = `你是「休校長小幫手」。你跟${displayName}聊了很多次，現在要寫一段話放在他的個人頁面上，標題叫「小幫手眼中的你」。
 
-這段話的目的：讓${displayName}看完覺得「原來你是這樣看我的」——被理解、被看見。
+核心目的：讓${displayName}看到「她自己看不到的好」。
 
-以下是你從所有互動中觀察到的：
+大部分學員只看到自己的不好——又破戒了、又沒做到、體重又沒動。
+你的任務是從她說過的話和做過的事裡，找到她的好：
+- 她的行動力（她做了什麼，不管多小）
+- 她努力想改變自己的意念（她為什麼還在這裡聊天？因為她沒放棄）
+- 她善待身體的那些時刻（選了什麼、問了什麼、觀察了什麼）
+
+以下是你的素材：
 
 ${materials}
 
-【你要寫什麼】
-從上面的素材裡找出這個人的「人」——
-他面對困難時是什麼反應？（逃避？硬撐？還是想辦法？）
-他用心的地方在哪？（主動學？默默做？還是會問為什麼？）
-他有什麼改變是他自己可能沒注意到的？
+【怎麼寫——最重要】
+1. 引用她說過的原話（「你說過⋯⋯」）——這是讓她覺得「你真的有在聽」的關鍵
+2. 點出一個她自己可能沒注意到的改變——「你可能覺得沒什麼，但⋯⋯」
+3. 用具體的行為說她的好，不要用形容詞（「你會把零食買了放著不一定吃」比「你很有自制力」好一百倍）
 
-寫這些。不要寫他的目標、他的菜單、他的數字——那些頁面其他地方已經有了。
-
-【語氣——最重要】
-你說話的方式跟一休一樣：溫暖、直接、口語。
-像朋友在 LINE 上跟他說話，不是在寫報告。
-
-好的語氣範例：
-「說真的，你是那種不會只照做的人。你會想知道為什麼，想通了才願意動。」
-「你不是沒遇過卡關，但你每次的反應都是再試一次，不是算了。光是這個，就跟大部分的人不一樣。」
-「我記得你從一開始什麼都不確定，到現在會自己判斷該怎麼吃。這個變化你可能覺得沒什麼，但我覺得很厲害。」
-
-壞的語氣（絕對禁止）：
-- 「像一位研究者般」「將經驗轉化為深刻洞察」「迷人的特質」 → AI 分析腔，刪
-- 「這是一段為你撰寫的文字」 → meta 語句，刪
-- 「受害者轉化為掌控者」 → 心理學術語，刪
-- 「展現了積極的態度與顯著的進展」 → 考績評語，刪
-- 任何聽起來像論文、像評語、像心靈雞湯的句子 → 全部砍掉
+【語氣】
+溫暖、直接、口語。像朋友在 LINE 跟她說真心話。
+禁止：AI 分析腔、心理學術語、考績評語、心靈雞湯、「展現了」「迷人的」「積極的態度」。
 
 【格式】
-- 用「你」稱呼
+- 用「你」稱呼，直接叫名字不加「學員」
 - 2-3 段，每段 1-2 句話
-- 總共 120-160 字
+- 總共 120-180 字
 - 最後一句要具體（跟這個人的經歷有關），不要「加油」「相信自己」
-- 直接開始寫，不要任何開場白或自我介紹`;
+- 直接開始寫，不要開場白`;
 
-  try {
-    const key = process.env.GEMINI_API_KEY;
-    if (!key) {
-      console.error('[Portrait] GEMINI_API_KEY not set');
-      return cached || null;
-    }
+  // 優先 Claude Haiku（寫作品質更好），Gemini fallback
+  let text = null;
+  const cached = await r.get(cacheKey);
 
-    console.log(`[Portrait] Generating for ${displayName} (journey=${journey?.length || 0}, progress=${progressRecords?.length || 0})`);
-
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent?key=${key}`,
-      {
+  const claudeKey = process.env.CLAUDE_API_KEY;
+  if (claudeKey) {
+    try {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.7, maxOutputTokens: 400 },
-        }),
+        headers: { 'content-type': 'application/json', 'x-api-key': claudeKey, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 500, messages: [{ role: 'user', content: prompt }] }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        text = data.content?.[0]?.text?.trim();
+        if (text) console.log(`[Portrait] Claude Haiku OK: ${text.length} chars for ${displayName}`);
+      } else {
+        console.warn(`[Portrait] Claude failed: ${res.status}`);
       }
-    );
-
-    if (!res.ok) {
-      const errText = await res.text();
-      console.error(`[Portrait] Gemini HTTP ${res.status}:`, errText.substring(0, 200));
-      return cached || null;
+    } catch (err) {
+      console.warn('[Portrait] Claude error:', err.message);
     }
-
-    const data = await res.json();
-    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-
-    if (!text) {
-      console.error('[Portrait] Gemini returned empty. Response:', JSON.stringify(data).substring(0, 300));
-      return cached || null;
-    }
-
-    console.log(`[Portrait] Generated ${text.length} chars for ${displayName}`);
-
-    // 快取 7 天
-    await r.set(cacheKey, text, { ex: 7 * 24 * 60 * 60 });
-    return text;
-  } catch (err) {
-    console.error('[Portrait] Error:', err.message);
   }
 
-  // 生成失敗時回傳舊的快取（如果有）
-  return cached || null;
+  // Gemini fallback
+  if (!text) {
+    try {
+      const geminiKey = process.env.GEMINI_API_KEY;
+      if (!geminiKey) return cached || null;
+
+      console.log(`[Portrait] Fallback to Gemini for ${displayName}`);
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent?key=${geminiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { temperature: 0.7, maxOutputTokens: 400 },
+          }),
+        }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        text = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+      }
+    } catch (err) {
+      console.error('[Portrait] Gemini error:', err.message);
+    }
+  }
+
+  if (!text) return cached || null;
+
+  console.log(`[Portrait] Generated ${text.length} chars for ${displayName}`);
+  await r.set(cacheKey, text, { ex: PORTRAIT_TTL });
+  return text;
 }
 
 export async function GET(request) {
