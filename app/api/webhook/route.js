@@ -699,6 +699,17 @@ async function bufferAndSchedule(replyToken, userId, text) {
       if (isCorrect) {
         // 加入收集（用 Set 避免重複計算）
         await redis.sadd(QUIZ_KEY(userId), food);
+        // 同步寫 Supabase（Dashboard 讀這張表）
+        try {
+          const { getSupabase } = await import('@/lib/supabase');
+          const sb = getSupabase();
+          if (sb) {
+            await sb.from('coach_quiz_collected').upsert(
+              { user_id: userId, food },
+              { onConflict: 'user_id,food' }
+            );
+          }
+        } catch (e) { console.error('[FoodQuiz] Supabase save error:', e); }
       }
       const collected = await redis.scard(QUIZ_KEY(userId)) || 0;
       const level = getQuizLevel(collected);
