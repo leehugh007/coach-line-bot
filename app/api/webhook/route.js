@@ -927,6 +927,44 @@ const QUICK_REPLIES = [
   { pattern: /^[\s]*[👍❤️💪🙏😊👏🔥💕🥰😍😘🫶✨⭐️🌟]+[\s]*$/, replies: ['😊', '💪', '❤️'] },
 ];
 
+/**
+ * 🔑 同主題重複偵測（方向 1+3）
+ * 用中文 bigram 比對最近用戶訊息，偵測同主題反覆提問
+ */
+function detectTopicRepetition(chatHistory, currentMessage) {
+  const userMessages = chatHistory
+    .filter(m => m.role === 'user')
+    .map(m => m.parts?.[0]?.text || '')
+    .filter(t => t.length > 5)
+    .slice(-5);
+
+  if (userMessages.length < 2) return { count: 1, brief: false, summarize: false };
+
+  const getBigrams = (text) => {
+    const chars = text.replace(/[^\u4e00-\u9fff]/g, '');
+    const set = new Set();
+    for (let i = 0; i < chars.length - 1; i++) set.add(chars.substring(i, i + 2));
+    return set;
+  };
+
+  const currentBigrams = getBigrams(currentMessage);
+  if (currentBigrams.size < 2) return { count: 1, brief: false, summarize: false };
+
+  let overlapCount = 0;
+  for (const msg of userMessages) {
+    const msgBigrams = getBigrams(msg);
+    let overlap = 0;
+    for (const b of currentBigrams) if (msgBigrams.has(b)) overlap++;
+    if (overlap >= 2) overlapCount++;
+  }
+
+  return {
+    count: overlapCount + 1,
+    brief: overlapCount >= 2,
+    summarize: overlapCount >= 4,
+  };
+}
+
 function getQuickReply(text) {
   const trimmed = text.trim();
   for (const { pattern, replies } of QUICK_REPLIES) {
@@ -1030,16 +1068,51 @@ async function processBatchedMessages(userId, messages) {
     // === 載入當前目標 ===
     const activeGoal = await getActiveGoal(userId);
 
-    // === 組合 userContext（用 AI 選取的切片動態注入 + 目標）===
+    // === 🔑 Follow-up 偵測：30 分鐘內已有完整上下文 → 追問可輕量化 ===
+    let isFollowUp = false;
+    try {
+      const { Redis: _R } = await import('@upstash/redis');
+      const _r = new _R({ url: process.env.KV_REST_API_URL, token: process.env.KV_REST_API_TOKEN });
+      isFollowUp = !!(await _r.get(`coach-fullctx:${userId}`));
+      if (isFollowUp) console.log(`[MSG] Follow-up mode: skipping journey/summary context`);
+    } catch (_) {}
+
+    // === 組合 userContext（follow-up 時跳過 journey/summary — AI 前幾次回覆已引用）===
     const contextUser = matchedPreload
       ? await getUser(userId)
       : (isIntro ? updatedUser : (user || updatedUser));
-    const userContext = buildUserContext(contextUser, coachingSummary, journeySummary, profileSlices, activeGoal);
+    const userContext = buildUserContext(
+      contextUser,
+      isFollowUp ? null : coachingSummary,
+      isFollowUp ? null : journeySummary,
+      profileSlices,
+      activeGoal
+    );
 
-    console.log(`[MSG] ${userId?.substring(0, 8)}: "${combinedText.substring(0, 60)}", msgs: ${messages.length}, history: ${chatHistory.length}, intro: ${isIntro}, slices: ${profileSlices?.join(',') || 'all'}, context: ${userContext.length}c`);
+    // === 🔑 同主題重複偵測 → 簡短/總結模式 ===
+    let contextSuffix = '';
+    const repetition = detectTopicRepetition(chatHistory, combinedText);
+    if (repetition.summarize) {
+      contextSuffix = `\n\n[重要：用戶已經反覆問同一個主題 ${repetition.count} 次了。請主動做一個重點總結（3 點以內），然後建議她如果還擔心可以直接跟一休老師說。不要再重複解釋原理。]`;
+      console.log(`[MSG] Topic repetition: summarize mode (${repetition.count}x)`);
+    } else if (repetition.brief) {
+      contextSuffix = `\n\n[注意：這個主題你已經解釋過了。這次直接回答她的具體問題，80 字以內，不要重複解釋原理。]`;
+      console.log(`[MSG] Topic repetition: brief mode (${repetition.count}x)`);
+    }
+
+    console.log(`[MSG] ${userId?.substring(0, 8)}: "${combinedText.substring(0, 60)}", msgs: ${messages.length}, history: ${chatHistory.length}, intro: ${isIntro}, slices: ${profileSlices?.join(',') || 'all'}, context: ${userContext.length}c, followUp: ${isFollowUp}`);
+
+    // === 設定 follow-up 旗標（30 分鐘 TTL）===
+    if (!isFollowUp) {
+      try {
+        const { Redis: _R2 } = await import('@upstash/redis');
+        const _r2 = new _R2({ url: process.env.KV_REST_API_URL, token: process.env.KV_REST_API_TOKEN });
+        await _r2.set(`coach-fullctx:${userId}`, '1', { ex: 1800 });
+      } catch (_) {}
+    }
 
     // === AI 回覆（用合併後的完整文字，傳入預計算的意圖）===
-    const reply = await handleMessage(combinedText, chatHistory, userContext, milestone, intent, userId);
+    const reply = await handleMessage(combinedText, chatHistory, userContext + contextSuffix, milestone, intent, userId);
 
     // === 儲存對話（存合併後的完整文字）===
     await addChatMessage(userId, 'user', combinedText);
