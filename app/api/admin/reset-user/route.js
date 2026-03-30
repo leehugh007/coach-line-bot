@@ -68,7 +68,9 @@ export async function DELETE(request) {
         'milestones',
         'goals',
         'coach_quiz_collected',
+        'coach_quiz_sessions',
         'coach_knowledge_collected',
+        'coach_knowledge_sessions',
       ];
 
       for (const table of tables) {

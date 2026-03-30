@@ -153,10 +153,10 @@ Redis 是快取，Supabase 是永久記憶。採用 **Read-through + Write-throu
 | `coaching_tags` | 教練標籤 | user_id, topic, emotion, core_issue, progress_signal, progress_detail, created_at |
 | `milestones` | 里程碑 | user_id, milestone, created_at |
 | `goals` | 行動目標 | user_id, goal_text, context, status(active/completed/replaced), created_at, completed_at |
-| `coach_quiz_collected` | 食物測驗已收集 | user_id, food, correct, created_at |
-| `coach_quiz_sessions` | 食物測驗作答紀錄 | user_id, score, total, created_at |
-| `coach_knowledge_collected` | 知識挑戰已收集 | user_id, question_index, correct, created_at |
-| `coach_knowledge_sessions` | 知識挑戰作答紀錄 | user_id, score, total, created_at |
+| `coach_quiz_collected` | 食物測驗已收集 | user_id, food, first_correct_at |
+| `coach_quiz_sessions` | 食物測驗作答紀錄 | user_id, score, total, correct_foods, wrong_foods, duration_seconds, created_at |
+| `coach_knowledge_collected` | 知識挑戰已收集 | user_id, question_index, created_at |
+| `coach_knowledge_sessions` | 知識挑戰作答紀錄 | user_id, score, total, tier, correct_indices, wrong_indices, duration_seconds, created_at |
 | `abc_self_checks` | 自我覺察紀錄 | user_id, check_date, ... |
 | `abc_api_usage` | Gemini API 花費 | user_id, call_type, model, input_tokens, output_tokens, thinking_tokens, total_tokens, cost_twd, bot, created_at |
 
