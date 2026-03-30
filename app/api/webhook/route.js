@@ -672,6 +672,13 @@ async function bufferAndSchedule(replyToken, userId, text) {
       ? `${catEmoji} 是非題來囉！`
       : `已掌握 ${collected} 個知識點（${level.emoji} ${level.title}）\n\n${catEmoji} 是非題來囉！`;
 
+    // 存 pending 狀態（手動打「對」「錯」也能識別）
+    try {
+      const r2 = (await import('@upstash/redis')).Redis;
+      const redis2 = new r2({ url: process.env.KV_REST_API_URL, token: process.env.KV_REST_API_TOKEN });
+      await redis2.set(PENDING_QUIZ_KEY(userId), JSON.stringify({ type: 'knowledge', idx: pick._idx }), { ex: 300 });
+    } catch (_) {}
+
     return await replyWithQuickReply(replyToken, `${intro}\n\n「${pick.statement}」\n\n這句話是對還是錯？`, [
       { label: '⭕ 對', text: `知識答：${pick._idx}→對` },
       { label: '❌ 錯', text: `知識答：${pick._idx}→錯` },
@@ -685,6 +692,28 @@ async function bufferAndSchedule(replyToken, userId, text) {
     const quizUrl = `https://coach-line-bot.vercel.app/quiz?u=${userId}`;
     return await sendMessage(replyToken, userId, `🍽️ 食物分類大挑戰\n\n10 題限時挑戰，答對就能收集食物！\n看你能認出幾種食物的真面目 😄\n\n👉 ${quizUrl}`);
   }
+
+  // === 食物/知識測驗：手動打答案也能識別（Quick Reply 被其他訊息沖掉時） ===
+  const PENDING_QUIZ_KEY = (uid) => `coach-quiz-pending:${uid}`;
+  try {
+    const r = (await import('@upstash/redis')).Redis;
+    const redis = new r({ url: process.env.KV_REST_API_URL, token: process.env.KV_REST_API_TOKEN });
+    const pending = await redis.get(PENDING_QUIZ_KEY(userId));
+    if (pending) {
+      const p = typeof pending === 'string' ? JSON.parse(pending) : pending;
+      await redis.del(PENDING_QUIZ_KEY(userId));
+      if (p.type === 'food' && (trimmed === p.optA || trimmed === p.optB)) {
+        // 轉換成標準格式，讓下面的 quizAnswerMatch 接手
+        const fakeText = `食物分類答：${p.food}→${trimmed}`;
+        return await processEvent({ ...event, message: { ...event.message, text: fakeText } });
+      }
+      if (p.type === 'knowledge' && (trimmed === '對' || trimmed === '錯')) {
+        const fakeText = `知識答：${p.idx}→${trimmed}`;
+        return await processEvent({ ...event, message: { ...event.message, text: fakeText } });
+      }
+      // 不是答案，pending 已清除，繼續正常流程
+    }
+  } catch (_) {}
 
   // === 食物分類答題：學員選了答案 ===
   const quizAnswerMatch = trimmed.match(/^食物分類答：(.+)→(.+)$/);
@@ -762,6 +791,9 @@ async function bufferAndSchedule(replyToken, userId, text) {
     const intro = collected === 0
       ? `考考你 😄`
       : `你已經認識 ${collected} 種食物了（${level.title}）\n繼續收集 😄`;
+
+    // 存 pending 狀態（手動打答案時也能識別）
+    await redis.set(PENDING_QUIZ_KEY(userId), JSON.stringify({ type: 'food', food: quiz.food, optA: quiz.optA, optB: quiz.optB }), { ex: 300 });
 
     return await replyWithQuickReply(replyToken, `${intro}\n\n${quiz.food}是${quiz.optA}還是${quiz.optB}？`, [
       { label: quiz.optA, text: `食物分類答：${quiz.food}→${quiz.optA}` },
