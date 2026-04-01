@@ -131,8 +131,11 @@ coach-class:{className}        → 班級資料
 coach-classes-index            → SET：所有班級名稱
 coach-push-log:{userId}        → 智慧推播紀錄（1天冷卻）
 coach-week-push:{userId}       → 課程週數推播紀錄（60天 TTL）
-coach-portrait:{userId}        → Dashboard AI 人格觀察快取（7天 TTL）
+coach-portrait:{userId}        → Dashboard AI 人格觀察快取（14天 TTL）
 coach-portrait-ver:{userId}    → Portrait 版本比對
+coach-fullctx:{userId}         → Follow-up 偵測（30min TTL，追問跳過 journey/summary）
+coach-summary-updated:{userId} → 教練摘要每日限頻（48hr TTL，台灣時間每天 1 次）
+coach-journey-updated:{userId} → 旅程摘要每日限頻（48hr TTL，台灣時間每天 1 次）
 ```
 
 注意：Redis 實例與幫你算 Bot 共用，但 key prefix 不同（`coach-` vs `chat:`/`user:`）。
