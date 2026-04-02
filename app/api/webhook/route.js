@@ -103,9 +103,9 @@ async function processEvent(event) {
 
     const { message } = event;
 
-    // ===== 群組訊息：暫時全部跳過 [2026-03-27] =====
-    if (sourceType === 'group' || sourceType === 'room') {
-      return; // 群組功能暫停，待重新討論偵測邏輯
+    // ===== 群組訊息處理 [2026-04-02 重新開啟，精準偵測模式] =====
+    if ((sourceType === 'group' || sourceType === 'room') && message.type === 'text') {
+      return await handleGroupMessage(event.source, userId, message.text, message.mention);
     }
 
     // ===== 私訊：buffer 合併後 AI 回覆 =====
@@ -205,10 +205,8 @@ async function handleGroupMessage(source, userId, text, mention) {
     }
   }
 
-  // 2. 偵測自我介紹（存入用戶資料，但不 return，繼續走 AI 偵測產生草稿）
-  let isGroupIntro = false;
+  // 2. 偵測自我介紹（存入用戶資料，但不觸發通知）
   if (looksLikeIntroduction(trimmed)) {
-    isGroupIntro = true;
     console.log(`[Group] Self-intro detected from ${displayName} in group ${groupId?.substring(0, 8)}`);
     try {
       await processIntroduction(userId, trimmed);
@@ -221,11 +219,22 @@ async function handleGroupMessage(source, userId, text, mention) {
     } catch (err) {
       console.error('[Group] Intro processing error:', err);
     }
-    // 不 return，繼續往下走產生草稿通知教練
+    return; // 自介只存資料，不通知教練
   }
 
-  // 3. 基本篩選：排除明顯不是問題的短訊息（自介直接跳過篩選）
-  if (!isGroupIntro && !basicMessageFilter(trimmed)) return;
+  // 3. 基本篩選：排除明顯不是問題的短訊息
+  if (!basicMessageFilter(trimmed)) return;
+
+  // 3.5 冷卻：同一學員 30 分鐘內最多通知 1 次
+  try {
+    const cooldownKey = `coach-group-cd:${userId}`;
+    const _r = getRedis();
+    const lastNotify = await _r.get(cooldownKey);
+    if (lastNotify) {
+      console.log(`[Group-Q] ${displayName} in cooldown, skip`);
+      return;
+    }
+  } catch (_) {}
 
   // 4. AI 判斷：帶上群組上下文
   const groupContext = await getGroupContext(groupId);
@@ -237,17 +246,20 @@ async function handleGroupMessage(source, userId, text, mention) {
   const confidence = detection.confidence || 0;
   console.log(`[Group-Q] ${displayName}: topic=${detection.topic}, confidence=${confidence}, reason=${detection.reason}`);
 
+  // 4.5 精準門檻：confidence < 0.8 不通知（寧可漏掉，不要亂推）
+  if (confidence < 0.8) {
+    console.log(`[Group-Q] ${displayName} confidence ${confidence} < 0.8, skip`);
+    return;
+  }
+
   try {
     // 取得學員已知資訊（如果有）
+    // 帶入學員完整 context（跟私訊一樣的 userContext，讓草稿更個人化）
     let studentContext = '';
     const user = await getUser(userId);
-    if (user?.info) {
-      const info = user.info;
-      const parts = [];
-      if (info.name) parts.push(`名字：${info.name}`);
-      if (info.job) parts.push(`職業：${info.job}`);
-      if (info.life_challenge) parts.push(`生活挑戰：${info.life_challenge}`);
-      if (parts.length > 0) studentContext = parts.join('，');
+    if (user) {
+      const { buildUserContext } = await import('@/lib/user');
+      studentContext = await buildUserContext(userId);
     }
 
     // 用 AI 偵測到的分類
@@ -313,6 +325,12 @@ async function handleGroupMessage(source, userId, text, mention) {
         }
       }
     }
+
+    // 設定冷卻：同學員 30 分鐘內不重複通知
+    try {
+      const _r3 = getRedis();
+      await _r3.set(`coach-group-cd:${userId}`, '1', { ex: 1800 });
+    } catch (_) {}
 
     console.log(`[Group-Q] Pending item saved: ${displayName} (${topic}, ${Math.round(confidence * 100)}%)`);
   } catch (err) {
