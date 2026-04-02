@@ -103,9 +103,10 @@ async function processEvent(event) {
 
     const { message } = event;
 
-    // ===== 群組訊息處理 [2026-04-02 重新開啟，精準偵測模式] =====
-    if ((sourceType === 'group' || sourceType === 'room') && message.type === 'text') {
-      return await handleGroupMessage(event.source, userId, message.text, message.mention);
+    // ===== 群組訊息處理 [2026-04-02 緊急關閉：錯頻到群組] =====
+    if ((sourceType === 'group' || sourceType === 'room')) {
+      console.log('[Group] DISABLED - ignoring all group messages');
+      return;
     }
 
     // ===== 私訊：buffer 合併後 AI 回覆 =====
