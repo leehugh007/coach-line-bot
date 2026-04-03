@@ -27,12 +27,11 @@ function getLevel(levels, count) {
  * 生成「小幫手眼中的你」— 人格觀察
  *
  * 邏輯：
- * 1. 提取完整素材（journey + tags + goals + milestones + selfChecks + progress + stats）
+ * 1. 提取完整素材（原話 + tags + goals + milestones + selfChecks + progress + stats）
  * 2. AI 綜合生成人格觀察
- * 3. 存 Redis，以 journey 版本（長度 hash）判斷是否需要重新生成
- *    journey 每 10 次對話更新一次，portrait 跟著演進
+ * 3. 存 Redis 快取（14 天 TTL）
  */
-async function getPortrait(userId, { displayName, journey, progressRecords, emotionTrend, goals, milestones, selfChecks, stats, quizCollected, knowledgeCollected }, forceRefresh = false) {
+async function getPortrait(userId, { displayName, progressRecords, emotionTrend, goals, milestones, selfChecks, stats, quizCollected, knowledgeCollected }, forceRefresh = false) {
   const r = getRedis();
   const cacheKey = `coach-portrait:${userId}`;
   const PORTRAIT_TTL = 14 * 24 * 60 * 60; // 2 週快取
@@ -83,14 +82,20 @@ async function getPortrait(userId, { displayName, journey, progressRecords, emot
     ? `【${displayName}說過的話（原文，最重要的素材）】\n${userQuotes.map(q => `「${q}」`).join('\n')}`
     : '';
 
-  // 背景素材
-  const journeyBlock = journey ? `【旅程背景】\n${fixName(journey).substring(0, 400)}` : '';
+  // 背景素材：用最近對話標籤取代 journey（journey 已停用，會過時導致不準）
+  const tagsBlock = (emotionTrend || []).length > 0
+    ? `【最近對話紀錄】\n${emotionTrend.slice(-10).map(t => {
+        const parts = [t.emotion];
+        if (t.progress && t.progress !== 'neutral') parts.push(t.progress);
+        return `- ${parts.join('/')}`;
+      }).join('\n')}`
+    : '';
   const progressBlock = (progressRecords || []).length > 0
     ? `【做到的改變】\n${progressRecords.slice(0, 5).map(p => `- ${fixName(p.detail)}`).join('\n')}`
     : '';
   const statsBlock = `【互動】活躍 ${stats.activeDays} 天、對話 ${stats.totalConversations} 次`;
 
-  const materials = [quotesBlock, progressBlock, journeyBlock, statsBlock].filter(Boolean).join('\n\n');
+  const materials = [quotesBlock, progressBlock, tagsBlock, statsBlock].filter(Boolean).join('\n\n');
 
   const prompt = `你是「休校長小幫手」。你跟${displayName}聊了很多次，現在要寫一段話放在他的個人頁面上，標題叫「小幫手眼中的你」。
 
@@ -212,7 +217,7 @@ export async function GET(request) {
       tagsRes,
       progressRes,
     ] = await Promise.all([
-      sb.from('users').select('display_name, class_name, journey, join_date').eq('id', userId).single(),
+      sb.from('users').select('display_name, class_name, join_date').eq('id', userId).single(),
       sb.from('coach_quiz_collected').select('food').eq('user_id', userId),
       sb.from('coach_knowledge_collected').select('question_index').eq('user_id', userId),
       sb.from('abc_self_checks').select('*').eq('user_id', userId).order('check_date', { ascending: false }).limit(7),
@@ -259,7 +264,6 @@ export async function GET(request) {
     const forceRefresh = searchParams.get('refresh') === '1';
     const portrait = await getPortrait(userId, {
       displayName,
-      journey: userRes.data?.journey,
       progressRecords,
       emotionTrend,
       goals: goalsRes.data || [],
@@ -294,7 +298,6 @@ export async function GET(request) {
         activeDays,
         totalConversations: convoCountRes.count || 0,
       },
-      journey: userRes.data?.journey || null,
       portrait,
       emotionTrend,
       progressRecords,

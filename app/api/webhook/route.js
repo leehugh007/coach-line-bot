@@ -29,9 +29,7 @@ import {
 } from '@/lib/user';
 import {
   extractCoachingTags, saveCoachingTags,
-  shouldUpdateTrend, updateCoachingSummary,
   checkMilestones, getTopicCount, getRecentTopics,
-  shouldUpdateJourney, updateJourneySummary,
 } from '@/lib/tags';
 import { NextResponse } from 'next/server';
 
@@ -1188,15 +1186,9 @@ async function backgroundTagProcessing(userId, userText, aiReply) {
       console.log(`[Goal] Goal completed for ${userId?.substring(0, 8)}`);
     }
 
-    if (await shouldUpdateTrend(userId)) {
-      console.log(`[Tags] Triggering trend update at ${totalTopics} topics`);
-      await updateCoachingSummary(userId);
-    }
-
-    if (await shouldUpdateJourney(userId)) {
-      console.log(`[Tags] Triggering journey update at ${totalTopics} topics`);
-      await updateJourneySummary(userId);
-    }
+    // journey/summary 背景更新已停用（2026-04-03）
+    // 原因：journey 累積式摘要會過時導致鬼打牆，改用即時 coaching_tags
+    // Portrait 改用 tags + 原話，不再依賴 journey
   } catch (err) {
     console.error('[Tags] Background processing error:', err);
   }
