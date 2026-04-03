@@ -30,8 +30,8 @@ import {
 import {
   extractCoachingTags, saveCoachingTags,
   shouldUpdateTrend, updateCoachingSummary,
-  getCoachingSummary, checkMilestones, getTopicCount,
-  shouldUpdateJourney, updateJourneySummary, getJourneySummary,
+  checkMilestones, getTopicCount, getRecentTopics,
+  shouldUpdateJourney, updateJourneySummary,
 } from '@/lib/tags';
 import { NextResponse } from 'next/server';
 
@@ -255,12 +255,15 @@ async function handleGroupMessage(source, userId, text, mention) {
 
   try {
     // 取得學員已知資訊（如果有）
-    // 帶入學員完整 context（跟私訊一樣的 userContext，讓草稿更個人化）
+    // 帶入學員完整 context（跟私訊一樣用 tags + profile，讓草稿更個人化）
     let studentContext = '';
     const user = await getUser(userId);
     if (user) {
       const { buildUserContext } = await import('@/lib/user');
-      studentContext = await buildUserContext(userId);
+      const tags = await getRecentTopics(userId, 15);
+      const { getActiveGoal } = await import('@/lib/user');
+      const goal = await getActiveGoal(userId);
+      studentContext = buildUserContext(user, tags, null, goal);
     }
 
     // 用 AI 偵測到的分類
@@ -1016,12 +1019,11 @@ async function processBatchedMessages(userId, messages) {
   }
 
   try {
-    // === 並行載入：對話歷史 + 用戶資料 + 心態摘要 + 旅程摘要 ===
-    const [rawHistory, user, coachingSummary, journeySummary] = await Promise.all([
+    // === 並行載入：對話歷史 + 用戶資料 + 最近標籤（取代 journey/summary）===
+    const [rawHistory, user, recentTags] = await Promise.all([
       getChatHistory(userId),
       getUser(userId),
-      getCoachingSummary(userId),
-      getJourneySummary(userId),
+      getRecentTopics(userId, 15),
     ]);
 
     const chatHistory = formatChatForGemini(rawHistory);
@@ -1096,14 +1098,13 @@ async function processBatchedMessages(userId, messages) {
       if (isFollowUp) console.log(`[MSG] Follow-up mode: skipping journey/summary context`);
     } catch (_) {}
 
-    // === 組合 userContext（follow-up 時跳過 journey/summary — AI 前幾次回覆已引用）===
+    // === 組合 userContext（用最近標籤取代 journey/summary，永遠反映最新狀態）===
     const contextUser = matchedPreload
       ? await getUser(userId)
       : (isIntro ? updatedUser : (user || updatedUser));
     const userContext = buildUserContext(
       contextUser,
-      isFollowUp ? null : coachingSummary,
-      isFollowUp ? null : journeySummary,
+      isFollowUp ? null : recentTags,
       profileSlices,
       activeGoal
     );
