@@ -20,7 +20,7 @@ import { savePendingItem } from '@/lib/pending';
 import { bufferMessage, isBufferReady, consumeBuffer, BATCH_DELAY, TEXT_EXTRA_DELAY } from '@/lib/queue';
 import {
   looksLikeIntroduction, processIntroduction,
-  getUser, recordInteraction, buildUserContext,
+  getUser, recordInteraction, buildUserContext, getClassStatus,
   tryMatchPreloaded, isLinNameDuplicate, setPendingVerify,
   getPendingVerify, clearPendingVerify, tryMatchByRealName,
   setPendingClassSelect, getPendingClassSelect, clearPendingClassSelect,
@@ -1007,6 +1007,36 @@ async function processBatchedMessages(userId, messages) {
   // 用最後一條的 replyToken（最新的才有效）
   const lastReplyToken = messages[messages.length - 1].replyToken;
 
+  // === 班級結業檢查 ===
+  let classStatus = 'active';
+  try {
+    const checkUser = await getUser(userId);
+    if (checkUser?.className || checkUser?.info?.className) {
+      const cn = checkUser.className || checkUser.info?.className;
+      classStatus = await getClassStatus(cn) || 'active';
+    } else {
+      // 沒有 class_name 的學員，從 Supabase 查
+      const { getSupabase } = await import('@/lib/supabase');
+      const sb = getSupabase();
+      if (sb) {
+        const { data } = await sb.from('users').select('class_name').eq('id', userId).single();
+        if (data?.class_name) {
+          classStatus = await getClassStatus(data.class_name) || 'active';
+        }
+      }
+    }
+  } catch (_) {}
+
+  if (classStatus === 'expired') {
+    console.log(`[ClassCheck] ${userId?.substring(0, 8)} expired, blocked`);
+    await sendMessage(lastReplyToken, userId,
+      '嗨！你的課程已經結束了 ☺️\n\n' +
+      '這段時間你真的進步很多，很多改變你自己可能沒感覺，但小幫手都看到了。\n\n' +
+      '如果想繼續有人陪著你、提醒你、幫你看飲食，隨時可以跟一休老師說想續報，我們會一直在 😊'
+    );
+    return;
+  }
+
   // === 客套話短路：省掉 3 次 Gemini API ===
   const quickReply = getQuickReply(combinedText);
   if (quickReply) {
@@ -1113,8 +1143,25 @@ async function processBatchedMessages(userId, messages) {
       activeGoal
     );
 
-    // === 🔑 同主題重複偵測 → 簡短/總結模式 ===
+    // === 結業期間 AI 自然帶續報 ===
     let contextSuffix = '';
+    if (classStatus === 'graduating') {
+      contextSuffix += `\n\n【重要情境：這位學員的課程剛結束】
+這則回覆正常回答他的問題，但在最後自然帶一段話（不要生硬，像朋友聊天）：
+
+核心轉換——很多學員不想續報，不是錢的問題，是覺得「我還要再花三個月去做一件我做不到的事」。
+你的任務是讓他看到：他已經做到了，而且做到的比他以為的多。
+
+怎麼帶：
+- 點出他這幾個月已經內化的改變（他可能覺得沒什麼，但你要讓他看到）
+- 續報不是「再上三個月課」，是繼續有人陪著他、提醒他、隨時幫他看方向
+- 接下來的重點是把學到的知識變成生活的一部分，用自己的節奏繼續走
+- 不要用「上課」「學習」這種字眼，用「有人陪著你」「繼續有人幫你看」
+
+語氣像朋友關心，不是推銷。這次對話提一次就好，不要每則都講。`;
+    }
+
+    // === 🔑 同主題重複偵測 → 簡短/總結模式 ===
     const repetition = detectTopicRepetition(chatHistory, combinedText);
     if (repetition.summarize) {
       contextSuffix = `\n\n[重要：用戶已經反覆問同一個主題 ${repetition.count} 次了。請主動做一個重點總結（3 點以內），然後建議她如果還擔心可以直接跟一休老師說。不要再重複解釋原理。]`;
