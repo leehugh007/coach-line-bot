@@ -101,10 +101,12 @@ async function processEvent(event) {
 
     const { message } = event;
 
-    // ===== 群組訊息處理 [2026-04-02 緊急關閉：錯頻到群組] =====
+    // ===== 群組訊息處理 =====
     if ((sourceType === 'group' || sourceType === 'room')) {
-      console.log('[Group] DISABLED - ignoring all group messages');
-      return;
+      if (message.type === 'text') {
+        return await handleGroupMessage(event.source, userId, message.text, message.mention);
+      }
+      return; // 非文字（貼圖/圖片等）靜默忽略，不掉到下面 catch-all
     }
 
     // ===== 私訊：buffer 合併後 AI 回覆 =====
