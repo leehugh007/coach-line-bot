@@ -29,9 +29,6 @@ export async function GET(request) {
   const cacheGoLive = '2026-04-04T08:00:00Z';
 
   // 拉 before（上線前 7 天）和 after（上線後到現在）
-  const { data, error } = await supabase.rpc('exec_sql', { sql: '' }).catch(() => ({ data: null, error: 'rpc not available' }));
-
-  // 直接用 Supabase query
   const [beforeResult, afterResult, dailyResult] = await Promise.all([
     // Before: cache 上線前 7 天
     supabase
@@ -57,7 +54,8 @@ export async function GET(request) {
       .eq('bot', 'coach')
       .eq('call_type', 'private_reply')
       .gte('created_at', '2026-03-21T00:00:00Z')
-      .order('created_at', { ascending: true }),
+      .order('created_at', { ascending: true })
+      .limit(5000),
   ]);
 
   const calcStats = (rows) => {
