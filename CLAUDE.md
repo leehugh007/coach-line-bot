@@ -62,7 +62,8 @@
 
 ```
 lib/
-  ai.js                ← SYSTEM_PROMPT（~3.2K 字）+ handleMessage() + aiDetectQuestion() + generateDraftResponse()
+  ai.js                ← SYSTEM_PROMPT（~3.2K 字）+ handleMessage() + aiDetectQuestion() + generateDraftResponse() + Context Caching 接入
+  gemini-cache.js      ← Gemini Context Caching 管理（共用 cache，建立/取得）
   knowledge.js         ← AI 意圖分類（classifyIntent，輸出 tags+mood+slices）+ 兩層式知識注入（Tier1 精華 + Tier2 x21）
   chat.js              ← 對話記憶（私訊 24hr TTL, max 40）+ 群組 buffer（2hr TTL, max 20）
   line.js              ← LINE API（驗簽 + reply + push + profile + groupSummary）
@@ -133,9 +134,13 @@ coach-push-log:{userId}        → 智慧推播紀錄（1天冷卻）
 coach-week-push:{userId}       → 課程週數推播紀錄（60天 TTL）
 coach-portrait:{userId}        → Dashboard AI 人格觀察快取（14天 TTL）
 coach-portrait-ver:{userId}    → Portrait 版本比對
+gemini-cache:coach-private     → Gemini Context Cache name（共用，TTL ~59min）
 coach-fullctx:{userId}         → Follow-up 偵測（30min TTL，追問跳過 journey/summary）
 coach-summary-updated:{userId} → 教練摘要每日限頻（48hr TTL，台灣時間每天 1 次）
 coach-journey-updated:{userId} → 旅程摘要每日限頻（48hr TTL，台灣時間每天 1 次）
+coach-quiz-pending:{userId}    → 測驗待答狀態（5min TTL，手動打答案識別用）
+coach-quiz:{userId}            → 食物測驗進行中狀態（5min TTL）
+coach-abc-quiz:{userId}        → ABC 測驗推播待答狀態（5min TTL）
 ```
 
 注意：Redis 實例與幫你算 Bot 共用，但 key prefix 不同（`coach-` vs `chat:`/`user:`）。
@@ -223,6 +228,7 @@ Redis 是快取，Supabase 是永久記憶。採用 **Read-through + Write-throu
 - **智慧截斷對話歷史**：chatHistory > 6 則時，最近 3 輪完整保留，更早的壓成一行摘要（省 ~30% input tokens）
 - **旅程摘要每日限頻**：shouldUpdateJourney 加台灣時間每天最多 1 次（Redis key: `coach-journey-updated:{userId}`，TTL 48hr）
 - **模型降級**：群組偵測 + 意圖分類改用 gemini-2.5-flash-lite（分類任務不需要 3.1-Lite，省 ~73%）
+- **Gemini Context Caching**（2026-04-04）：共用 cache（只 cache SYSTEM_PROMPT 5,714 tokens），所有用戶共用一份。cached tokens 計費打一折。`lib/gemini-cache.js` 管理 cache 建立/取得。handleMessage 接入：cache 可用時用 `cachedContent` 取代 `systemInstruction`，knowledge + userContext + milestone 補到 user message 前面。env `CONTEXT_CACHE_ENABLED=true`。Redis key `gemini-cache:coach-private`。Fallback：cache 失敗回完整 systemInstruction。預估省 67% input 成本（$35.82→$11.8/週）
 
 更新流程：新課程筆記 → 更新課程知識總結.md → 更新 knowledge.js Tier2 → push main
 
