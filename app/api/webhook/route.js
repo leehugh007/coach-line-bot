@@ -223,6 +223,13 @@ async function handleGroupMessage(source, userId, text, mention) {
     return; // 自介只存資料，不通知教練
   }
 
+  // 2.5 排除工作人員（教練、助教）— 他們是回答者不是提問者
+  const staffIds = [process.env.COACH_USER_ID, process.env.STAFF_USER_ID].filter(Boolean);
+  if (staffIds.includes(userId)) {
+    console.log(`[Group] Staff message from ${displayName}, skip detection`);
+    return;
+  }
+
   // 3. 基本篩選：排除明顯不是問題的短訊息
   if (!basicMessageFilter(trimmed)) return;
 
