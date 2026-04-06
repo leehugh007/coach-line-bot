@@ -215,34 +215,55 @@ function getWeeklyMessage(week, name) {
 // 沉默推播內容
 // ===================================================================
 
-function getSilentMessage(daysSilent, name, totalInteractions, goalText = null, streakData = null) {
-  const totalDays = streakData?.totalDays || 0;
-
-  // 有目標的學員：優先帶目標追蹤
-  if (goalText && daysSilent >= 2 && daysSilent < 7) {
-    return `${name}，上次你說要試試看「${goalText}」，這幾天做得怎麼樣？\n\n做到了很棒👍 沒做到也沒關係，跟我說狀況，我們一起調整 😊`;
-  }
-
+function getSilentMessage(daysSilent, name, goalText = null, courseWeek = 1) {
+  // 沉默 7+ 天 → 推知識小題目（降低互動門檻，不再問「你還好嗎」）
   if (daysSilent >= 7) {
-    if (totalDays > 10) {
-      return `${name}，你已經累積了 ${totalDays} 天的健康存摺。健康隨時可以重新開始，你回來的這一刻就已經在進步了 ☺️\n\n跟我聊聊最近的狀況？`;
+    const quiz = getRandomQuizForSilent(courseWeek);
+    if (quiz) {
+      const optList = quiz.opts.map((o, i) => `${i + 1}. ${o}`).join('\n');
+      return `${name}，考你一題 😄\n\n${quiz.q}\n\n${optList}\n\n回數字就好！`;
     }
-    if (goalText) {
-      return `${name}，好一陣子沒聊了。之前設的目標「${goalText}」還記得嗎？不管有沒有做到，跟我聊聊近況吧 😊`;
-    }
-    if (totalInteractions > 10) {
-      return `${name}，你之前跟我聊了${totalInteractions}次，每一次都是你在為自己做的選擇。最近有遇到什麼新的狀況嗎？不管什麼都可以跟我聊 😊`;
-    }
-    return `${name}，最近還好嗎？如果外食不知道怎麼選，按下面選單的「下一餐吃什麼」，跟我說你在哪吃，我幫你想搭配 😊`;
+    // fallback：沒有題目時用知識鉤子
+    const fallbacks = [
+      `${name}，你知道消化 100 大卡蛋白質，身體要花 25～30 大卡來處理嗎？所以多吃蛋白質，實際吸收的熱量更少 💪\n\n最近有什麼飲食問題嗎？直接問我就好 ☺️`,
+      `${name}，很多人以為玉米是蔬菜，其實它是澱粉！類似的隱藏分類還有不少。按選單的「考考我」試試 😄`,
+      `${name}，一休說：「環境會影響行為。」家裡沒零食就不會吃。你家冰箱現在有什麼？跟我說我幫你想搭配 😊`,
+    ];
+    return fallbacks[Math.floor(Math.random() * fallbacks.length)];
   }
 
+  // 沉默 2-6 天 + 有目標：帶目標追蹤（多句隨機）
+  if (goalText) {
+    const goalMsgs = [
+      `${name}，上次你說要試試看「${goalText}」，這幾天做得怎麼樣？\n\n做到了很棒👍 沒做到也沒關係，跟我說狀況，我們一起調整 😊`,
+      `${name}，「${goalText}」這個目標進展如何？不管做到幾成都算進步，跟我聊聊 ☺️`,
+      `${name}，想到你之前設的目標「${goalText}」。有沒有什麼卡住的地方？卡住很正常，我們一起想辦法 😊`,
+    ];
+    return goalMsgs[Math.floor(Math.random() * goalMsgs.length)];
+  }
+
+  // 沉默 2-6 天 + 無目標：隨機知識鉤子
   const hooks = [
     `${name}，你知道嗎？很多人以為玉米是蔬菜，其實它是澱粉！類似的隱藏分類還有不少。要不要考考自己？按選單的「考考我」試試 😄`,
     `${name}，最近很多同學在問：便利商店到底怎麼搭配最方便？我整理了一個萬用組合，你想看看嗎？`,
     `${name}，分享一個小撇步：自助餐三格配菜都選蔬菜，才剛好一餐的蔬菜量。聽起來很多？其實試了就知道很快就吃完 😄`,
     `${name}，最近有沒有遇到不知道能不能吃的食物？直接問我就好，什麼都可以問 ☺️`,
+    `${name}，考你一題：飯後走路的真正好處是什麼？A 燃燒大量卡路里 B 肌肉不靠胰島素就能吸收血糖 C 幫助消化\n\n回 A B C 就好 😄`,
   ];
   return hooks[Math.floor(Math.random() * hooks.length)];
+}
+
+/** 從 ABC_QUIZZES 隨機抽一題（優先抽當前課程週數的題） */
+function getRandomQuizForSilent(courseWeek) {
+  // 先試當前週數的題
+  const weekQuizzes = ABC_QUIZZES[courseWeek];
+  if (weekQuizzes && weekQuizzes.length > 0) {
+    return weekQuizzes[Math.floor(Math.random() * weekQuizzes.length)];
+  }
+  // 沒有就從所有週隨機抽
+  const allQuizzes = Object.values(ABC_QUIZZES).flat();
+  if (allQuizzes.length === 0) return null;
+  return allQuizzes[Math.floor(Math.random() * allQuizzes.length)];
 }
 
 // ===================================================================
@@ -493,6 +514,18 @@ async function handleEveningPush(sb, r, users, classMap, now) {
     const daysSilent = Math.min(daysSinceInteraction, daysSinceGroup);
     if (daysSilent < 2) continue; // 2天門檻
 
+    // 沉默 7+ 天 → 每 3 天才推一次（避免每天轟炸）
+    if (daysSilent >= 7) {
+      const silentPushKey = `coach-silent-push:${userId}`;
+      const lastSilentPush = await r.get(silentPushKey);
+      if (lastSilentPush) {
+        console.log(`[Silent] ${name}: 7d+ but pushed recently, skip`);
+        continue;
+      }
+      // 推完設 3 天冷卻
+      await r.set(silentPushKey, '1', { ex: 86400 * 3 });
+    }
+
     // === 優先：進步回顧（有 3+ 筆進步紀錄且未回顧過）===
     const progressReviewKey = `coach-progress-review:${userId}`;
     const lastReviewCount = await r.get(progressReviewKey);
@@ -531,17 +564,9 @@ async function handleEveningPush(sb, r, users, classMap, now) {
       continue; // 推了回顧就不推沉默
     }
 
-    // === 一般沉默推播（帶目標） ===
-    const [{ count: totalInteractions }, activeGoal, streakData] = await Promise.all([
-      sb.from('conversations')
-        .select('*', { count: 'exact', head: true })
-        .eq('user_id', userId)
-        .eq('role', 'user'),
-      getActiveGoal(userId),
-      (await import('@/lib/user')).getStreak(userId),
-    ]);
-
-    const message = getSilentMessage(daysSilent, name, totalInteractions || 0, activeGoal?.goal_text, streakData);
+    // === 一般沉默推播（帶目標 + 知識題） ===
+    const activeGoal = await getActiveGoal(userId);
+    const message = getSilentMessage(daysSilent, name, activeGoal?.goal_text, courseWeek);
 
     try {
       await pushMessage(userId, message);
