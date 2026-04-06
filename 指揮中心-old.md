@@ -1,0 +1,570 @@
+# 休校長小幫手指揮中心
+
+> 休校長小幫手的完整組織架構圖。從全局思考時讀這份，不用翻 CLAUDE.md。
+> 新功能加進來 → 歸到對應部門。新部門出現 → 加一個 section。
+> 最後更新：2026-04-01
+
+---
+
+## 快速定位
+
+| 我想... | 去哪個部門 |
+|---------|-----------|
+| 改 AI 怎麼回話 | [II. AI 分析部門](#ii-ai-分析部門) |
+| 改知識注入 | [III. 知識系統](#iii-知識系統) |
+| 改記住什麼 / 怎麼記 | [IV. 記憶系統](#iv-記憶系統) |
+| 改個人化邏輯 / 標籤 | [V. 用戶智能系統](#v-用戶智能系統) |
+| 改群組偵測 | [VI. 群組偵測系統](#vi-群組偵測系統) |
+| 改推播 / 報告 | [VII. 推播與遊戲化](#vii-推播與遊戲化) |
+| 改後台（管理/助教） | [VIII. 管理後台](#viii-管理後台) |
+| 改學員面向頁面 | [IX. 學員頁面](#ix-學員頁面) |
+| 看完整資料流 | [跨部門資料流](#跨部門資料流) |
+| 看部門之間怎麼接 | [相依性圖](#相依性圖) |
+
+---
+
+## 組織架構總覽
+
+```
+休校長小幫手
+├── I.    訊息入口 ─── LINE webhook → 簽名驗證 → buffer 合併 → 分流
+├── II.   AI 分析 ──── SYSTEM_PROMPT + Gemini 雙模型 + 意圖分類
+├── III.  知識系統 ─── AI 意圖分類 + 兩層式知識注入（Tier1 + Tier2 x21）
+├── IV.   記憶系統 ─── Redis（快取）+ Supabase（永久）+ Read-through 回補
+├── V.    用戶智能 ─── 標籤提取 + 趨勢摘要 + 旅程追蹤 + 里程碑
+├── VI.   群組偵測 ─── AI 問題偵測 + 草稿 + 點名推播（⚠️ 2026-03-27 暫停）
+├── VII.  推播與遊戲化 ── 智慧推播 + 食物測驗 + 知識挑戰 + 健康存摺 + 目標
+├── VIII. 管理後台 ─── 群組監控 + 學員管理 + 助教後台
+└── IX.   學員頁面 ─── Dashboard + 飲食指南 + 測驗 + 自我覺察
+```
+
+---
+
+## I. 訊息入口部門
+
+> 所有用戶訊息的第一站。接住、驗證、合併、分流。
+
+| 檔案 | 職責 | 碰什麼外部服務 |
+|------|------|--------------|
+| `app/api/webhook/route.js` | LINE 事件入口、加好友流程（選班 + 姓名比對）、私訊合併調度、群組分流 | LINE API、Redis |
+| `lib/queue.js` | 私訊訊息合併（buf:{userId}，40 秒窗口，防連發多則被拆成多次回覆） | Redis |
+| `lib/line.js` | 簽名驗證、reply/push 訊息、getProfile、getGroupMemberProfile、getGroupSummary | LINE Messaging API |
+
+**處理流程：**
+```
+LINE 事件 → 簽名驗證 → HTTP 200
+  ├─ follow（加好友）→ 預載入比對 → 選班 → 姓名確認 → 歡迎
+  ├─ memberLeft → 清除 class_name
+  ├─ 群組訊息 → ⚠️ 暫停（2026-03-27）
+  └─ 私訊文字 → buffer 合併（40s 窗口）→ 指令偵測 → AI 回覆
+```
+
+**加好友流程（選班 + 預載入）：**
+```
+加好友 → getProfile → tryMatchPreloaded()
+  ├─ 完全比對成功 → 歡迎 + 帶自介
+  ├─ 重名 → setPendingVerify → 確認真實姓名
+  ├─ 無比對 → setPendingClassSelect → Quick Reply 選班
+  │            └─ 選完班 → 引導自我介紹
+  └─ 無預載資料 → 純歡迎 + 引導自介
+```
+
+**改這個部門會影響：** 所有下游部門。這裡壞了 = 整個 Bot 不回話。
+
+---
+
+## II. AI 分析部門
+
+> 決定小幫手「怎麼想、怎麼說」。改 AI 行為主要改這裡。
+
+| 檔案 | 職責 | 碰什麼外部服務 |
+|------|------|--------------|
+| `lib/ai.js` | SYSTEM_PROMPT（~254 行）+ handleMessage() + basicMessageFilter + aiDetectQuestion + generateDraftResponse | Gemini API |
+| `lib/cost-tracker.js` | 每次 Gemini API call 記錄 token + TWD 成本 | Supabase abc_api_usage |
+
+**三層模型策略（2026-04-01 更新）：**
+
+| 層級 | 模型 | 用途 | $/1M (in/out) |
+|------|------|------|-------------|
+| 高品質 | `claude-haiku-4.5` | Portrait（學員看的成品） | $1.00/$5.00 |
+| 對話 | `gemini-3.1-flash-lite-preview` | 主對話、群組草稿 | $0.25/$1.50 |
+| 便宜 | `gemini-2.5-flash-lite` | 意圖分類、群組偵測、標籤、自介解析、教練摘要、旅程摘要 | $0.10/$0.40 |
+
+原則：**看的人決定模型等級** — 學員看的成品用 Haiku，AI 讀的中間產物用 Flash Lite。2026-04-01 A/B 測試驗證：journey/summary 用 Flash Lite 產，注入後 AI 回覆品質與 Haiku 無差異。
+
+**成本優化機制（2026-04-01 更新）：**
+
+- 客套話短路：10 類 pattern（謝謝/好/收到/早安/哈哈/讚/繼續保持/對沒錯/先這樣/emoji）→ 跳過所有 AI
+- 智慧截斷對話歷史（> 6 則時壓摘要，省 ~30% input）
+- **追問輕量化**：30 分鐘內追問跳過 journey/coachingSummary 注入（Redis `coach-fullctx:{userId}` 30min TTL）
+- **同主題重複偵測**：bigram 比對，3+ 次→簡短模式，5+ 次→主動總結
+- 教練摘要限頻：每 3 天 + ≥5 次新對話才觸發（Redis `coach-summary-updated:{userId}` TTL 7 天）
+- 旅程摘要限頻：每 3 天 + ≥5 次新對話才觸發（Redis `coach-journey-updated:{userId}` TTL 7 天）
+- 群組偵測模型降級：意圖分類改用 gemini-2.5-flash-lite（省 ~73%）
+
+**SYSTEM_PROMPT 架構：**
+```
+SYSTEM_PROMPT（~254 行，永遠帶）
+  ├─ 7 大核心教學理念
+  ├─ 營養核心知識（菜肉飯順序、蛋白質優先...）
+  ├─ 一休經典金句（心態/失敗/自我價值/飲食）
+  ├─ 回覆風格（溫暖直接、200-400 字）
+  └─ 7 種常見情境指引
+  + knowledgeContext（Tier1 + Tier2，由 knowledge.js 組裝）
+  + userContext（每次動態組裝）
+```
+
+**改這個部門會影響：** 成本（模型選擇）、回覆品質（prompt）、知識準確度。
+
+---
+
+## III. 知識系統
+
+> 課程知識的注入管道。決定小幫手「懂多少」。
+
+| 檔案 | 職責 |
+|------|------|
+| `lib/knowledge.js` | AI 意圖分類（classifyIntent）+ Tier1/Tier2 知識組裝 + 用戶切片注入 + regex 降級備案 |
+
+**知識來源：** 27 份課程筆記 + 代謝力重建實驗 Sessions 4-14 + 65 份班級對話紀錄
+
+**選取方式：AI 意圖分類（主要）+ regex 降級備案**
+```
+classifyIntent()（Gemini Flash Lite ~200 token, temp 0.1）
+  輸入：用戶訊息 + 最近 2 則上下文
+  輸出：{ tags, mood, slices }
+```
+
+**兩層知識架構：**
+
+| 層 | 注入方式 | 大小 |
+|---|---------|------|
+| **Tier 1** | 永遠注入精華 | ~800 字元（代謝重建 ABC、胰島素、菜肉飯、蛋白質、好油壞油、外食策略） |
+| **Tier 2** | AI 選取最多 2 塊 | 21 塊（膽固醇/聚餐/肌少症/神經習慣/暴食心態/停滯期...） |
+
+**用戶切片注入：**
+- identity 永遠注入
+- AI 選取 0-2 塊：lifestyle / body_goal / coaching_trend / journey
+- AI 失敗時回退為全量注入
+
+**更新流程：** 新課程筆記 → 課程知識總結.md → knowledge.js Tier2 → push main
+
+**改這個部門會影響：** 回覆的專業深度和準確度。知識選取太多 = prompt 太長注意力分散，太少 = 回覆空泛。
+
+---
+
+## IV. 記憶系統
+
+> 小幫手的護城河。負責「記住你是誰」。
+
+### 快取層（Redis）
+
+| Key | 類型 | TTL | 職責 |
+|-----|------|-----|------|
+| `coach-chat:{userId}` | List | 24hr | 私訊對話記憶（max 40 則） |
+| `coach-group:{groupId}` | List | 2hr | 群組訊息 buffer（max 20 則） |
+| `coach-user:{userId}` | JSON | 無 | 用戶資料（自介、互動次數、info） |
+| `coach-buf:{userId}` | String | 40s | 私訊合併 buffer |
+| `coach:{userId}:topics` | List | 無 | 對話標籤（max 20） |
+| `coach:{userId}:milestones` | Set | 無 | 已觸發里程碑 |
+| `coach:{userId}:summary` | String | 無 | AI 心態摘要 |
+| `coach:{userId}:journey` | String | 無 | 累積式旅程摘要（500-800 字） |
+| `coach-goal:{userId}` | JSON | 無 | 當前活躍目標 |
+| `coach-streak:{userId}` | String | 無 | 健康存摺連續天數 |
+| `coach-pending:items` | List | 無 | 群組問題待回應（max 100） |
+| `coach-pending-class:{userId}` | String | 7天 | 等待選班 |
+| `coach-pending-verify:{userId}` | String | 7天 | 等待姓名確認（含 selectedClass） |
+| `coach-preload:{lineName}` | JSON | 無 | 預載入學員自介（正規化名稱） |
+| `coach-preload:__index` | Set | 無 | 所有已匯入的正規化名稱 |
+| `coach-preload-name:{realName}` | JSON | 無 | 真實姓名對應（重名時用） |
+| `coach-preload:__dupes` | Set | 無 | 有重名的正規化名稱 |
+| `coach-class:{className}` | JSON | 無 | 班級資料 |
+| `coach-classes-index` | Set | 無 | 所有班級名稱 |
+| `coach-quiz-pending:{userId}` | JSON | 5min | 測驗待答狀態（手動打答案識別用） |
+| `coach-journey-updated:{userId}` | String | 48hr | 旅程摘要每日限頻（台灣時間日期） |
+| `coach-push-log:{userId}` | String | 1天 | 智慧推播紀錄（冷卻） |
+| `coach-week-push:{userId}` | String | 60天 | 課程週數推播紀錄 |
+| `coach-portrait:{userId}` | String | 14天 | 「小幫手眼中的你」Claude Haiku 生成，引用學員原話 |
+| `coach-portrait-ver:{userId}` | String | 無 | Portrait 版本比對 |
+| `coach-summary-updated:{userId}` | String | 48hr | 教練摘要每日限頻（台灣時間日期） |
+| `coach-fullctx:{userId}` | String | 30min | 追問上下文標記（追問輕量化用） |
+| `coach-quiz:{userId}` | JSON | 5min | 食物測驗進行中狀態 |
+| `coach-abc-quiz:{userId}` | JSON | 5min | ABC 測驗推播待答狀態 |
+
+### 永久層（Supabase）
+
+| 表 | 職責 | 寫入時機 |
+|---|------|---------|
+| `users` | 用戶檔案（自介 + 班別 + 旅程 + 目標） | Write-through |
+| `conversations` | 對話紀錄 | Write-through |
+| `coaching_tags` | 教練標籤（topic/emotion/core_issue） | 每次對話後 |
+| `milestones` | 里程碑紀錄 | 觸發時 |
+| `goals` | 行動目標（active/completed/replaced） | 設定/完成時 |
+| `coach_quiz_collected` | 食物測驗已收集 | 作答後 |
+| `coach_quiz_sessions` | 食物測驗作答紀錄 | 每次測驗 |
+| `coach_knowledge_collected` | 知識挑戰已收集 | 作答後 |
+| `coach_knowledge_sessions` | 知識挑戰作答紀錄 | 每次測驗 |
+| `abc_self_checks` | 自我覺察紀錄（5 指標 × 5 級距） | 表單提交 |
+| `abc_api_usage` | Gemini API 花費 | 每次 API call |
+
+### 存取模式
+
+| 模式 | 邏輯 | 管理檔案 |
+|------|------|---------|
+| **Write-through** | 寫 Redis → 非阻塞 sync Supabase | `lib/user.js`, `lib/chat.js` |
+| **Read-through** | 讀 Redis → miss → 從 Supabase 恢復 + 回寫 Redis | `lib/user.js`, `lib/chat.js`, `lib/tags.js` |
+
+### 管理檔案
+
+| 檔案 | 職責 |
+|------|------|
+| `lib/user.js` | 用戶 CRUD、自介偵測/解析、預載入比對、班別選擇、目標系統、健康存摺、buildUserContext() |
+| `lib/chat.js` | 對話歷史（私訊 24hr + 群組 2hr）、formatChatForGemini、群組上下文 |
+| `lib/supabase.js` | Supabase 客戶端單例 |
+
+**改這個部門會影響：** 個人化品質、資料一致性。**這裡改壞 = 小幫手失憶。**
+
+---
+
+## V. 用戶智能系統
+
+> 從對話中提取知識、分析趨勢。決定小幫手「懂不懂你」。
+
+| 檔案 | 職責 |
+|------|------|
+| `lib/tags.js` | 教練標籤提取（topic/emotion/core_issue/conversation_style/goal_action/goal_completed）+ 趨勢摘要 + 旅程摘要 + 里程碑檢查 |
+| `lib/user.js` | buildUserContext()（靜態 profile + summary + journey + 目標） |
+
+**標籤提取管線：**
+```
+AI 回覆完成 → extractCoachingTags() → saveCoachingTags()
+  → shouldUpdateTrend()？→ 每 3 天 + ≥5 次對話 → updateCoachingSummary()（Flash Lite）
+  → shouldUpdateJourney()？→ 每 3 天 + ≥5 次對話 → updateJourneySummary()（Flash Lite）
+  → checkMilestones()
+```
+
+**旅程摘要系統：**
+- 觸發：每 3 天 + ≥5 次新對話（Redis `coach-journey-updated:{userId}` 存 timestamp，TTL 7 天）
+- 累積式：前一版旅程 + 近 20 標籤 + 摘要 + 最近對話 + 里程碑 → Flash Lite 產生更新版（AI 讀的中間產物，不需要高品質寫作）
+- 格式：500-800 字（開始動機、階段進展、困難克服、目前狀態）
+- 注入：buildUserContext() 的「學員旅程」區塊
+
+**Read-through 回補（Redis miss 時）：**
+
+| 函式 | Supabase 查詢 |
+|------|--------------|
+| `getRecentTopics()` | `coaching_tags` 最近 20 則 |
+| `getTopicCount()` | `coaching_tags` count |
+| `getCoachingSummary()` | ≥3 則 → AI 重新產生 |
+| `getJourneySummary()` | `users.journey` |
+
+**改這個部門會影響：** 小幫手「懂不懂你」的程度。標籤品質 = 個人化深度。
+
+---
+
+## VI. 群組偵測系統
+
+> ⚠️ **2026-03-27 暫停**：群組功能暫時關閉，偵測邏輯待重新討論。以下為原有架構。
+
+| 檔案 | 職責 |
+|------|------|
+| `lib/ai.js` | aiDetectQuestion()（帶上下文 AI 偵測）、generateDraftResponse() |
+| `lib/pending.js` | 待回應管理（Redis LIST, max 100） |
+| `lib/chat.js` | addGroupMessage()、getGroupContext() |
+
+**原有流程：**
+```
+群組訊息 → addGroupMessage() → basicMessageFilter()
+  → aiDetectQuestion()（信心指數 0.0-1.0）
+  → generateDraftResponse()（走完整 SYSTEM_PROMPT + 知識注入）
+  → savePendingItem()
+  → pushMessage() 通知教練（🔴🟡⚪ + 班別）
+```
+
+**點名偵測（也已暫停）：**
+- @ 3人以上 + 點名關鍵字 → 自動推播關心訊息給被點名的學員
+- 兩種語氣：上傳提醒 / 鼓勵互動
+
+---
+
+## VII. 推播與遊戲化
+
+> 主動觸達 + 遊戲化留存。讓學員持續回來。
+
+| 檔案 | 職責 | 觸發方式 |
+|------|------|---------|
+| `app/api/cron/smart-push/route.js` | 智慧推播入口（4 種排程） | Vercel Cron |
+| `lib/quiz-data.js` | 食物分類測驗題庫（178 題，8 大分類，4 等級收集） | 用戶觸發 |
+| `lib/knowledge-quiz-data.js` | 瘦身知識大挑戰題庫（270 題是非題，6 分類 × 3 難度） | 用戶觸發 |
+| `lib/user.js` | 目標系統（setGoal/completeGoal）+ 健康存摺（streak） | 對話觸發 |
+
+**Cron 排程（vercel.json）：**
+
+| UTC | 台灣時間 | type 參數 | 用途 |
+|-----|---------|----------|------|
+| 每週三 00:00 | 週三 08:00 | `weekly` | 課程週數推播 |
+| 每天 12:10 | 20:10 | `evening` | 沉默學員關心 |
+| 每週四 04:15 | 週四 12:15 | `renewal-noon` | 續報提醒 |
+| 每週六 02:00 | 週六 10:00 | `abc-quiz` | ABC 測驗推播 |
+
+**遊戲化系統：**
+
+| 功能 | 說明 |
+|------|------|
+| 食物分類測驗 | 178 題，8 大分類，4 等級（食物新手→食物博士），優先出新題。LINE 對話內 + 網頁版。雙寫 Redis + Supabase |
+| 瘦身知識大挑戰 | 270 題是非題，零 token 消耗。LINE 對話內（是非 Quick Reply）+ 網頁版。寫 Supabase |
+| 「考考我」選遊戲 | Quick Reply 選食物分類或瘦身知識，不再只出食物題 |
+| 健康存摺 | streak 連續互動天數 |
+| 行動目標 | 對話中自然設定 → AI 追蹤 → Quick Reply 回報 |
+| 里程碑 | 互動次數觸發，自然鼓勵 |
+
+**改這個部門會影響：** 用戶留存。推太多 = 被封鎖，推太少 = 被遺忘。
+
+---
+
+## VIII. 管理後台
+
+> 教練和助教操作用。
+
+| 路徑 | 功能 | 驗證 |
+|------|------|------|
+| `app/admin/page.js` | 群組監控 + 手動草稿 + 學員匯入 | ADMIN_API_KEY |
+| `app/admin/students/page.js` | 學員列表 + 快捷分班 + 搜尋 + 對話紀錄 + 標籤 | ADMIN_API_KEY |
+| `app/staff/page.js` | 助教後台（學員狀態 + 主動關心 + 班級管理 + 名單上傳） | ADMIN_API_KEY / STAFF key |
+
+| API 端點 | 功能 |
+|---------|------|
+| `/api/admin/pending` | 待回應 API |
+| `/api/admin/import` | 學員匯入 API |
+| `/api/admin/users` | 學員列表 API |
+| `/api/admin/history` | 學員對話紀錄（Supabase 讀取） |
+| `/api/admin/outreach` | 主動關心推播（支援 admin + staff key） |
+| `/api/admin/students` | 學員管理（更新 class_name） |
+| `/api/admin/setup-menu` | Rich Menu 設定 |
+| `/api/admin/draft` | 手動生成草稿 |
+| `/api/admin/cleanup` | 資料清理 |
+| `/api/admin/reset-user` | 用戶資料重置（清除 Redis 14 key + Supabase 9 表） |
+| `/api/staff/classes` | 班級管理（CRUD + 停課區間） |
+| `/api/staff/students` | 學員狀態（含停課週數計算） |
+
+---
+
+## IX. 學員頁面
+
+> 學員直接使用的網頁。
+
+| 路徑 | 功能 |
+|------|------|
+| `/dashboard` | 學員 Dashboard（Portrait + 情緒趨勢 + 進步紀錄 + 收集進度 + 目標 + 里程碑） |
+| `/guide` | 飲食指南（7 個分類） |
+| `/quiz` | 食物分類測驗（收集系統，4 等級） |
+| `/quiz/history` | 食物測驗歷史 |
+| `/knowledge` | 瘦身知識大挑戰（270 題是非題） |
+| `/knowledge/history` | 知識挑戰歷史 |
+| `/check` | 自我覺察表單（5 指標 × 5 級距） |
+| `/check/history` | 自我覺察趨勢頁 |
+
+| API 端點 | 功能 |
+|---------|------|
+| `/api/dashboard` | Portrait AI 人格觀察 + 情緒趨勢 + 進步紀錄 |
+| `/api/quiz` | 食物分類測驗 API |
+| `/api/knowledge` | 瘦身知識大挑戰 API |
+| `/api/check` | 自我覺察 API（POST 儲存 / GET 歷史） |
+
+---
+
+## 跨部門資料流
+
+### 私訊：學員傳一則文字
+
+```
+①  LINE 事件
+    │
+②  訊息入口：webhook → 簽名驗證 → HTTP 200
+    │
+③  訊息入口：bufferAndSchedule() → Redis buffer → 40s 窗口等待合併
+    │
+④  記憶系統：getUser()（Read-through）、getChatHistory()
+    │
+⑤  用戶智能：buildUserContext()
+    ├─ 靜態：profile + summary + journey
+    └─ 目標：activeGoal
+    │
+⑥  知識系統：classifyIntent()
+    ├─ Gemini Flash Lite ~200 token
+    └─ 輸出 tags/mood/slices → 組裝 Tier1 + Tier2 + 用戶切片
+    │
+⑦  AI 分析：handleMessage()
+    ├─ SYSTEM_PROMPT + knowledgeContext + userContext + chatHistory
+    ├─ Gemini 3.1 Flash Lite
+    └─ cost-tracker 記錄花費
+    │
+⑧  訊息入口：sendMessage()（先回覆用戶）
+    │
+⑨  記憶系統：addChatMessage()（Write-through → Supabase）
+    │
+⑩  用戶智能（背景，不阻塞回覆）：
+    ├─ extractCoachingTags() → saveCoachingTags()
+    ├─ shouldUpdateTrend()？→ 每 15 次 + 每天最多 1 次 → updateCoachingSummary()
+    ├─ shouldUpdateJourney()？→ 每 10 次 → updateJourneySummary()
+    ├─ checkMilestones()
+    └─ recordStreak()
+```
+
+### 智慧推播（Cron）
+
+```
+Vercel Cron → /api/cron/smart-push?type=evening
+  │
+  遍歷有 class_name 的學員
+    ├─ 檢查冷卻（coach-push-log, 1 天 TTL）
+    ├─ 檢查最近互動（conversations count）
+    ├─ 沉默 > N 天 → 個人化關心推播 → LINE Push
+    └─ 記錄推播日誌
+```
+
+---
+
+## 相依性圖
+
+```
+            ┌──────────┐
+            │  LINE    │
+            │  API     │
+            └────┬─────┘
+                 │
+    ┌────────────▼────────────┐
+    │  I. 訊息入口             │
+    │  webhook + queue + line  │
+    └────┬───────────┬────────┘
+         │           │
+         ▼           ▼
+┌────────────┐  ┌──────────────┐
+│ VI. 群組   │  │ IV. 記憶系統  │◄─── Supabase
+│ 偵測(暫停) │  │ user + chat   │◄─── Redis
+│ pending    │  │ + supabase    │
+└────────────┘  └──┬────────┬──┘
+                   │        │
+          ┌────────▼─┐  ┌───▼──────────────┐
+          │ III. 知識 │  │ V. 用戶智能       │
+          │ knowledge │  │ tags + user       │
+          └────┬─────┘  └────────┬──────────┘
+               │                 │
+          ┌────▼─────────────────▼──┐
+          │ II. AI 分析              │
+          │ ai.js + cost-tracker     │
+          └──────────┬──────────────┘
+                     │
+    ┌────────────────▼──────────────┐
+    │ VII. 推播與遊戲化              │
+    │ smart-push + quiz + knowledge │
+    │ + streak + goals              │
+    └───────────────────────────────┘
+```
+
+---
+
+## 改東西前：影響範圍速查
+
+| 我要改... | 直接影響 | 連帶影響 |
+|----------|---------|---------|
+| SYSTEM_PROMPT | AI 回覆風格/品質 | 標籤提取品質（AI 回覆格式變了可能影響） |
+| knowledge.js | 知識注入內容 | 回覆專業度、classifyIntent 的 tags 匹配 |
+| tags.js | 標籤/摘要/旅程提取 | 個人化品質、Dashboard 情緒趨勢、推播邏輯 |
+| user.js | 用戶資料讀寫 | 所有部門（幾乎所有檔案都 import user.js） |
+| chat.js | 對話歷史 | AI 看到的上下文 |
+| queue.js | buffer 窗口 | 回覆速度 vs 完整度的平衡 |
+| quiz-data.js | 食物測驗題庫 | 收集進度、等級系統 |
+| knowledge-quiz-data.js | 知識挑戰題庫 | 知識收集進度 |
+| smart-push | 推播邏輯 | 用戶留存 / 被封鎖風險 |
+| Supabase 表結構 | 永久層 | **所有讀寫該表的 code** |
+
+---
+
+## 完整檔案清單
+
+### lib/（12 個模組）
+
+| 檔案 | 部門 | 一句話 |
+|------|------|--------|
+| `ai.js` | AI 分析 | SYSTEM_PROMPT + handleMessage + aiDetectQuestion + generateDraftResponse |
+| `chat.js` | 記憶 | 對話歷史（私訊 24hr + 群組 2hr）+ 群組上下文 |
+| `cost-tracker.js` | AI 分析 | Gemini API 花費追蹤（per-user token + TWD） |
+| `knowledge.js` | 知識 | AI 意圖分類 + 兩層式知識注入 + 用戶切片 + regex 降級 |
+| `knowledge-quiz-data.js` | 遊戲化 | 瘦身知識大挑戰題庫（270 題是非題） |
+| `line.js` | 訊息入口 | LINE API 工具集（驗簽 + reply + push + profile） |
+| `pending.js` | 群組偵測 | 待回應管理（Redis LIST, max 100） |
+| `queue.js` | 訊息入口 | 私訊合併（40s 窗口） |
+| `quiz-data.js` | 遊戲化 | 食物分類測驗題庫（178 題，8 大分類，4 等級） |
+| `supabase.js` | 記憶 | Supabase 客戶端單例 |
+| `tags.js` | 用戶智能 | 教練標籤 + 趨勢摘要 + 旅程摘要 + 里程碑 |
+| `user.js` | 記憶/用戶智能 | 用戶管理 + 預載入 + 班別 + 目標 + streak + buildUserContext |
+
+### app/api/（15 個端點）
+
+| 路徑 | 部門 | 一句話 |
+|------|------|--------|
+| `/api/webhook` | 訊息入口 | LINE webhook 主入口（maxDuration=120） |
+| `/api/cron/smart-push` | 推播 | 智慧推播（4 種排程） |
+| `/api/dashboard` | 學員頁面 | Portrait + 情緒趨勢 + 進步紀錄 |
+| `/api/quiz` | 遊戲化 | 食物分類測驗 |
+| `/api/knowledge` | 遊戲化 | 瘦身知識大挑戰 |
+| `/api/check` | 學員頁面 | 自我覺察（POST/GET） |
+| `/api/health` | 監控 | 健康檢查（Redis/Supabase/Gemini） |
+| `/api/admin/pending` | 管理後台 | 待回應 API |
+| `/api/admin/import` | 管理後台 | 學員匯入 |
+| `/api/admin/users` | 管理後台 | 學員列表 |
+| `/api/admin/history` | 管理後台 | 對話紀錄 |
+| `/api/admin/outreach` | 管理後台 | 主動關心推播 |
+| `/api/admin/students` | 管理後台 | 學員管理（分班） |
+| `/api/admin/setup-menu` | 管理後台 | Rich Menu 設定 |
+| `/api/admin/draft` | 管理後台 | 手動草稿 |
+| `/api/admin/cleanup` | 管理後台 | 資料清理 |
+| `/api/admin/reset-user` | 管理後台 | 用戶重置（Redis 14 key + Supabase 8 表） |
+| `/api/staff/classes` | 管理後台 | 班級 CRUD |
+| `/api/staff/students` | 管理後台 | 學員狀態 |
+
+### app/ 頁面（11 個）
+
+| 路徑 | 部門 |
+|------|------|
+| `/` | 根頁面 |
+| `/admin` | 管理後台 |
+| `/admin/students` | 管理後台 |
+| `/staff` | 管理後台（助教） |
+| `/dashboard` | 學員頁面 |
+| `/guide` | 學員頁面 |
+| `/quiz` | 學員頁面 |
+| `/quiz/history` | 學員頁面 |
+| `/knowledge` | 學員頁面 |
+| `/knowledge/history` | 學員頁面 |
+| `/check` | 學員頁面 |
+| `/check/history` | 學員頁面 |
+
+---
+
+## 與阿算（幫你算 Bot）的關係
+
+| 項目 | 共用 | 各自獨立 |
+|------|------|---------|
+| Redis 實例 | ✅ 同一個 Upstash Redis | key prefix 不同（`coach-` vs `user:`/`chat:`） |
+| Supabase | ✅ 同一個專案 | 表名不同（`users` vs `abc_users`） |
+| Gemini API Key | ✅ 共用 | 模型選擇不同 |
+| abc_api_usage | ✅ 共用（花費追蹤） | — |
+| abc_self_checks | ✅ 共用（自我覺察） | — |
+| LINE | ❌ 不同的 LINE OA | — |
+| Vercel 部署 | ❌ 不同的 Vercel project | — |
+
+---
+
+## 更新紀錄
+
+| 日期 | 變更 |
+|------|------|
+| 2026-04-01 | fix: 群組 @回覆誤判自介導致 display_name 錯置（何啟維→無敵雙寶媽）。looksLikeIntroduction 過濾 @開頭 + extractProfile prompt 防護 |
+| 2026-03-31 | feat: 教練摘要每日限頻、追問輕量化 + 同主題重複偵測。Redis key 補齊（fullctx/summary-updated） |
+| 2026-03-30 | 測驗 pending 狀態（手動答題識別）、照片 prompt 強化、里程碑 detected_at 修正、Redis key 補齊 |
+| 2026-03-30 | 食物測驗 LINE 雙寫 Supabase + 回填 20 人、reset-user 補清 sessions 表（8→9 張）、遊戲化寫入路徑標註 |
+| 2026-03-29 | 同步 3/29 全日改動：標籤頻率 5→15、旅程每日限頻、Redis key 補齊、知識題對話內作答、/api/health、考考我選遊戲 |
+| 2026-03-29 | 另一 session 更新：三層模型策略（Claude Haiku + Gemini）、Portrait 重構、成本優化機制 |
+| 2026-03-28 | 初版建立，9 個部門、12 個 lib 模組、17 個 API 端點、11 個頁面 |

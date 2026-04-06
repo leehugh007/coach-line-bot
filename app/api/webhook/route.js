@@ -223,12 +223,29 @@ async function handleGroupMessage(source, userId, text, mention) {
     return; // 自介只存資料，不通知教練
   }
 
-  // 2.5 排除工作人員（教練、助教）— 他們是回答者不是提問者
+  // 2.5 排除工作人員 — 他們是回答者不是提問者
   const staffIds = [process.env.COACH_USER_ID, process.env.STAFF_USER_ID].filter(Boolean);
   if (staffIds.includes(userId)) {
-    console.log(`[Group] Staff message from ${displayName}, skip detection`);
+    console.log(`[Group] Staff (ID) ${displayName}, skip`);
     return;
   }
+  // 查 Supabase role 排除營養師/助教（查不到就自動建記錄，方便後續標記）
+  try {
+    const { getSupabase } = await import('@/lib/supabase');
+    const sb = getSupabase();
+    if (sb) {
+      const { data } = await sb.from('users').select('role').eq('id', userId).single();
+      if (data?.role && data.role !== 'student') {
+        console.log(`[Group] Staff (role: ${data.role}) ${displayName}, skip`);
+        return;
+      }
+      if (!data) {
+        // 第一次在群組發言的人 → 建基本記錄，助教後台可標記 role
+        await sb.from('users').upsert({ id: userId, display_name: displayName, role: 'student' }, { onConflict: 'id' });
+        console.log(`[Group] New user created: ${displayName}`);
+      }
+    }
+  } catch (_) { /* 不阻塞 */ }
 
   // 3. 基本篩選：排除明顯不是問題的短訊息
   if (!basicMessageFilter(trimmed)) return;

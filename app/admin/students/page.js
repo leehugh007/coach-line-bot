@@ -95,6 +95,21 @@ export default function StudentsPage() {
     setDetailLoading(false);
   }
 
+  async function updateRole(userId, role) {
+    try {
+      const res = await fetch('/api/admin/students', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-admin-key': adminKey },
+        body: JSON.stringify({ userId, role }),
+      });
+      if (res.ok) {
+        setStudents(prev => prev.map(s => s.id === userId ? { ...s, role } : s));
+      }
+    } catch (err) {
+      console.error('Update role error:', err);
+    }
+  }
+
   async function updateClass(userId, className) {
     try {
       const res = await fetch('/api/admin/students', {
@@ -404,8 +419,17 @@ export default function StudentsPage() {
                 style={{ padding: '14px 16px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
               >
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2, flexWrap: 'wrap' }}>
                     <span style={{ fontWeight: 600, fontSize: 15 }}>{s.display_name || s.id?.substring(0, 12) + '...'}</span>
+                    {s.role && s.role !== 'student' && (
+                      <span
+                        onClick={(e) => { e.stopPropagation(); if (confirm(`把 ${s.display_name} 改回學員？`)) updateRole(s.id, 'student'); }}
+                        style={{ fontSize: 10, padding: '1px 6px', borderRadius: 8, background: s.role === 'nutritionist' ? '#E8F5E9' : '#FFF3E0', color: s.role === 'nutritionist' ? '#2E7D32' : '#E65100', fontWeight: 600, cursor: 'pointer' }}
+                        title="點擊改回學員"
+                      >
+                        {s.role === 'nutritionist' ? '營養師' : '工作人員'}
+                      </span>
+                    )}
                     {s.class_name && (
                       <span style={{ fontSize: 11, padding: '1px 8px', borderRadius: 10, background: '#E8EAF6', color: '#3F51B5', fontWeight: 600 }}>
                         {s.class_name}
@@ -435,11 +459,25 @@ export default function StudentsPage() {
                       </button>
                     </div>
                   ) : (
-                    <button
-                      onClick={(e) => { e.stopPropagation(); setEditingClass(s.id); setClassInput(s.class_name || ''); }}
-                      style={{ padding: '4px 8px', border: '1px solid #ddd', borderRadius: 6, fontSize: 11, cursor: 'pointer', background: 'white', color: '#888' }}>
-                      改班
-                    </button>
+                    <div style={{ display: 'flex', gap: 4 }} onClick={(e) => e.stopPropagation()}>
+                      <button
+                        onClick={() => { setEditingClass(s.id); setClassInput(s.class_name || ''); }}
+                        style={{ padding: '4px 8px', border: '1px solid #ddd', borderRadius: 6, fontSize: 11, cursor: 'pointer', background: 'white', color: '#888' }}>
+                        改班
+                      </button>
+                      {(!s.role || s.role === 'student') && (
+                        <button
+                          onClick={() => {
+                            const role = prompt(`標記 ${s.display_name} 的角色：\n1 = 工作人員（助教）\n2 = 營養師\n\n輸入 1 或 2：`);
+                            if (role === '1') updateRole(s.id, 'staff');
+                            else if (role === '2') updateRole(s.id, 'nutritionist');
+                          }}
+                          style={{ padding: '4px 6px', border: '1px solid #ddd', borderRadius: 6, fontSize: 11, cursor: 'pointer', background: 'white', color: '#E65100' }}
+                          title="標記為工作人員">
+                          👤
+                        </button>
+                      )}
+                    </div>
                   )}
                 </div>
               </div>

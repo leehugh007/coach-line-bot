@@ -23,15 +23,25 @@ export async function POST(request) {
     return NextResponse.json({ error: 'Supabase not configured' }, { status: 500 });
   }
 
-  const { userId, className } = await request.json();
+  const { userId, className, role } = await request.json();
 
   if (!userId) {
     return NextResponse.json({ error: 'userId is required' }, { status: 400 });
   }
 
+  const updates = { updated_at: new Date().toISOString() };
+  if (className !== undefined) updates.class_name = className || null;
+  if (role !== undefined) {
+    const validRoles = ['student', 'staff', 'nutritionist'];
+    if (!validRoles.includes(role)) {
+      return NextResponse.json({ error: `role must be one of: ${validRoles.join(', ')}` }, { status: 400 });
+    }
+    updates.role = role;
+  }
+
   const { error } = await sb
     .from('users')
-    .update({ class_name: className || null, updated_at: new Date().toISOString() })
+    .update(updates)
     .eq('id', userId);
 
   if (error) {
