@@ -276,8 +276,8 @@ async function handleGroupMessage(source, userId, text, mention) {
       if (summary?.groupName) groupName = summary.groupName;
     } catch (e) { /* ignore */ }
 
-    // 產生草稿回覆
-    const draft = await generateDraftResponse(trimmed, studentContext, userId);
+    // 產生草稿回覆（帶群組上下文，讓草稿知道前後在聊什麼）
+    const draft = await generateDraftResponse(trimmed, studentContext, userId, groupContext);
     if (!draft) {
       console.log('[Group-Q] Draft generation failed, skipping');
       return;
