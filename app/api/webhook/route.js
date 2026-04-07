@@ -229,9 +229,9 @@ async function handleGroupMessage(source, userId, text, mention) {
     console.log(`[Group] Staff (ID) ${displayName}, skip`);
     return;
   }
-  // displayName 關鍵字排除（營養師 LINE 名稱都帶標記，不依賴 DB）
-  const staffKeywords = ['營養師', '助教', '教練'];
-  if (staffKeywords.some(kw => displayName.includes(kw))) {
+  // displayName 比對排除工作人員（不依賴 DB）
+  const staffNames = ['Susan', 'Uzzi', '楊子緣', '彥綺', 'chao', 'jie', '黃湘儒', 'Mandy', '凜', 'Evelyn', '何啟維', '營養師', '助教', '教練'];
+  if (staffNames.some(kw => displayName.includes(kw))) {
     console.log(`[Group] Staff (name: ${displayName}), skip`);
     return;
   }
