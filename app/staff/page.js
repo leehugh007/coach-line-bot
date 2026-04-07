@@ -183,6 +183,7 @@ export default function StaffPage() {
   }
 
   const updateStudentClass = async (userId, className) => {
+    if (!userId) { alert('此學員尚未加好友或尚未比對成功，請先到學員管理頁面手動分班'); setEditingClassId(null); setClassInputValue(''); return; }
     try {
       await fetch('/api/admin/students', {
         method: 'POST',
@@ -316,8 +317,9 @@ export default function StaffPage() {
               <tbody>
                 {students.map((s, i) => {
                   const st = STATUS_MAP[s.status] || STATUS_MAP.unknown;
+                  const rowKey = s.userId || s.lineName || `row-${i}`;
                   return (
-                    <tr key={i} style={{ background: s.status === 'care' ? '#FFF5F5' : s.status === 'watch' ? '#FFFDE7' : 'white' }}>
+                    <tr key={rowKey} style={{ background: s.status === 'care' ? '#FFF5F5' : s.status === 'watch' ? '#FFFDE7' : 'white' }}>
                       <td style={{ padding: '10px 8px', borderBottom: '1px solid #f0f0f0', fontWeight: 600 }}>{s.name}</td>
                       <td style={{ padding: '10px 8px', borderBottom: '1px solid #f0f0f0', color: '#666' }}>{s.className || '-'}</td>
                       <td style={{ padding: '10px 8px', borderBottom: '1px solid #f0f0f0' }}>{s.currentWeek ? `第${s.currentWeek}週` : '-'}</td>
@@ -329,7 +331,7 @@ export default function StaffPage() {
                         <span style={{ padding: '2px 8px', borderRadius: 10, fontSize: 12, fontWeight: 600, background: st.bg, color: st.color }}>{st.label}</span>
                       </td>
                       <td style={{ padding: '10px 8px', borderBottom: '1px solid #f0f0f0' }}>
-                        {editingClassId === s.userId ? (
+                        {editingClassId === rowKey ? (
                           <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
                             <input value={classInputValue} onChange={e => setClassInputValue(e.target.value)}
                               placeholder="班別" autoFocus style={{ width: 80, padding: '3px 6px', borderRadius: 4, border: '1px solid #ddd', fontSize: 12 }}
@@ -347,11 +349,11 @@ export default function StaffPage() {
                                 {c}
                               </button>
                             ))}
-                            <button onClick={() => { setEditingClassId(s.userId); setClassInputValue(''); }}
+                            <button onClick={() => { setEditingClassId(rowKey); setClassInputValue(''); }}
                               style={{ padding: '2px 5px', border: '1px solid #ddd', borderRadius: 4, fontSize: 10, cursor: 'pointer', background: 'white', color: '#aaa' }}>⋯</button>
                           </div>
                         ) : (
-                          <button onClick={() => { setEditingClassId(s.userId); setClassInputValue(s.className); }}
+                          <button onClick={() => { setEditingClassId(rowKey); setClassInputValue(s.className); }}
                             style={{ padding: '2px 6px', border: '1px solid #ddd', borderRadius: 4, fontSize: 11, cursor: 'pointer', background: 'white', color: '#888' }}>改班</button>
                         )}
                       </td>

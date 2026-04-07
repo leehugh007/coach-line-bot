@@ -578,6 +578,12 @@ async function bufferAndSchedule(replyToken, userId, text) {
           } catch (e) { console.error('[Verify] Class assign error:', e); }
         }
 
+        // 嘗試標記 preloaded 為已比對（用 LINE 名稱或真名）
+        try {
+          const { markPreloadedMatched } = await import('@/lib/user');
+          await markPreloadedMatched(userId, verifyData.displayName || trimmed, trimmed);
+        } catch (e) { console.error('[Verify] Mark preloaded error:', e); }
+
         console.log(`[Verify] No preload match for: ${trimmed}, assigned to ${selectedClass}`);
         return await sendMessage(replyToken, userId,
           `歡迎你 ${trimmed} ☺️\n\n不知道下一餐怎麼搭？跟我說你平常在哪裡買（便利商店？自助餐？早餐店？），我幫你想幾個 ABC 搭配，直接照著買就好 😊\n\n有任何問題隨時來聊！`
