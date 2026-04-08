@@ -13,7 +13,7 @@
 import { FOOD_QUIZZES, QUIZ_LEVELS as QUIZ_LEVELS_DATA } from '@/lib/quiz-data';
 import { KNOWLEDGE_QUIZZES, KNOWLEDGE_LEVELS } from '@/lib/knowledge-quiz-data';
 import { verifySignature, sendMessage, pushMessage, replyWithQuickReply, getProfile, getGroupMemberProfile, getGroupSummary } from '@/lib/line';
-import { handleMessage, basicMessageFilter, aiDetectQuestion, generateDraftResponse } from '@/lib/ai';
+import { handleMessage, basicMessageFilter, aiDetectQuestion, generateDraftResponse, generateAchievementDraftResponse } from '@/lib/ai';
 import { getChatHistory, addChatMessage, formatChatForGemini, addGroupMessage, getGroupContext } from '@/lib/chat';
 import { classifyIntent } from '@/lib/knowledge';
 import { savePendingItem } from '@/lib/pending';
@@ -251,36 +251,25 @@ async function handleGroupMessage(source, userId, text, mention) {
   // 3. 基本篩選：排除明顯不是問題的短訊息
   if (!basicMessageFilter(trimmed)) return;
 
-  // 3.5 冷卻：同一學員 30 分鐘內最多通知 1 次
-  try {
-    const cooldownKey = `coach-group-cd:${userId}`;
-    const _r = getRedis();
-    const lastNotify = await _r.get(cooldownKey);
-    if (lastNotify) {
-      console.log(`[Group-Q] ${displayName} in cooldown, skip`);
-      return;
-    }
-  } catch (_) {}
-
-  // 4. AI 判斷：帶上群組上下文
+  // 4. AI 判斷：帶上群組上下文（無冷卻，有問題就通知）
   const groupContext = await getGroupContext(groupId);
   // 排除當前這則（剛剛才存進去的最後一則）
   const contextForDetect = groupContext.slice(0, -1);
   const detection = await aiDetectQuestion(trimmed, contextForDetect, userId);
-  if (!detection || !detection.isQuestion) return;
+  if (!detection || (!detection.isQuestion && !detection.isAchievement)) return;
 
   const confidence = detection.confidence || 0;
-  console.log(`[Group-Q] ${displayName}: topic=${detection.topic}, confidence=${confidence}, reason=${detection.reason}`);
+  const isAchievement = detection.isAchievement || false;
+  console.log(`[Group] ${displayName}: q=${detection.isQuestion}, ach=${isAchievement}, topic=${detection.topic}, conf=${confidence}`);
 
-  // 4.5 精準門檻：confidence < 0.8 不通知（寧可漏掉，不要亂推）
-  if (confidence < 0.8) {
+  // 問題需 confidence >= 0.8 才通知；心得不設門檻
+  if (detection.isQuestion && !isAchievement && confidence < 0.8) {
     console.log(`[Group-Q] ${displayName} confidence ${confidence} < 0.8, skip`);
     return;
   }
 
   try {
-    // 取得學員已知資訊（如果有）
-    // 帶入學員完整 context（跟私訊一樣用 tags + profile，讓草稿更個人化）
+    // 取得學員背景（問題草稿和心得草稿共用）
     let studentContext = '';
     const user = await getUser(userId);
     if (user) {
@@ -291,9 +280,6 @@ async function handleGroupMessage(source, userId, text, mention) {
       studentContext = buildUserContext(user, tags, null, goal);
     }
 
-    // 用 AI 偵測到的分類
-    const topic = detection.topic || 'other';
-
     // 取得群組名稱（用於後台顯示班別）
     let groupName = '';
     try {
@@ -301,69 +287,82 @@ async function handleGroupMessage(source, userId, text, mention) {
       if (summary?.groupName) groupName = summary.groupName;
     } catch (e) { /* ignore */ }
 
-    // 產生草稿回覆（帶群組上下文，讓草稿知道前後在聊什麼）
-    const draft = await generateDraftResponse(trimmed, studentContext, userId, groupContext);
-    if (!draft) {
-      console.log('[Group-Q] Draft generation failed, skipping');
-      return;
-    }
-
-    // 存入待回應
-    await savePendingItem({
-      groupId,
-      groupName,
-      userId,
-      studentName: displayName,
-      message: trimmed,
-      topic,
-      confidence,
-      draft,
-    });
-
-    // 推播通知教練（Telegram 優先，LINE Push 備援）
-    const topicMap = { mindset: '心態', diet: '飲食', plateau: '體重停滯', emotion: '情緒', other: '問題' };
-    const confidenceLabel = confidence >= 0.8 ? '🔴' : confidence >= 0.6 ? '🟡' : '⚪';
     const groupLabel = groupName ? `【${groupName}】` : '';
-    const notifyText = `${confidenceLabel}${groupLabel} ${displayName} 提了${topicMap[topic] || ''}問題（信心 ${Math.round(confidence * 100)}%），草稿已備好。`;
 
-    // Telegram 通知（免費無上限）
-    const tgToken = process.env.TELEGRAM_BOT_TOKEN;
-    const tgChat = process.env.TELEGRAM_CHAT_ID;
-    if (tgToken && tgChat) {
-      try {
-        await fetch(`https://api.telegram.org/bot${tgToken}/sendMessage`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            chat_id: tgChat,
-            text: `${notifyText}\n\n學員說：\n「${trimmed?.substring(0, 200)}」\n\n→ 查看後台：https://coach-line-bot.vercel.app/admin`,
-          }),
-        });
-      } catch (e) {
-        console.error('[Group-Q] Telegram notify error:', e);
-      }
-    } else {
-      // Telegram 沒設定時 fallback 到 LINE Push
-      const coachId = process.env.COACH_USER_ID;
-      if (coachId) {
-        try {
-          const { pushMessage } = await import('@/lib/line');
-          await pushMessage(coachId, `${notifyText}\n到後台查看：https://coach-line-bot.vercel.app/admin`);
-        } catch (e) {
-          console.error('[Group-Q] LINE Push notify error:', e);
+    // === 問題處理 ===
+    if (detection.isQuestion && confidence >= 0.8) {
+      const topic = detection.topic || 'other';
+      const draft = await generateDraftResponse(trimmed, studentContext, userId, groupContext);
+      if (!draft) {
+        console.log('[Group-Q] Draft generation failed, skipping');
+      } else {
+        await savePendingItem({ groupId, groupName, userId, studentName: displayName, message: trimmed, topic, confidence, draft });
+
+        const topicMap = { mindset: '心態', diet: '飲食', plateau: '體重停滯', emotion: '情緒', other: '問題' };
+        const confidenceLabel = confidence >= 0.8 ? '🔴' : confidence >= 0.6 ? '🟡' : '⚪';
+        const notifyText = `${confidenceLabel}${groupLabel} ${displayName} 提了${topicMap[topic] || ''}問題（信心 ${Math.round(confidence * 100)}%），草稿已備好。`;
+
+        const tgToken = process.env.TELEGRAM_BOT_TOKEN;
+        const tgChat = process.env.TELEGRAM_CHAT_ID;
+        if (tgToken && tgChat) {
+          try {
+            await fetch(`https://api.telegram.org/bot${tgToken}/sendMessage`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                chat_id: tgChat,
+                text: `${notifyText}\n\n學員說：\n「${trimmed?.substring(0, 200)}」\n\n→ 查看後台：https://coach-line-bot.vercel.app/admin`,
+              }),
+            });
+          } catch (e) { console.error('[Group-Q] Telegram notify error:', e); }
+        } else {
+          const coachId = process.env.COACH_USER_ID;
+          if (coachId) {
+            try {
+              await pushMessage(coachId, `${notifyText}\n到後台查看：https://coach-line-bot.vercel.app/admin`);
+            } catch (e) { console.error('[Group-Q] LINE Push notify error:', e); }
+          }
         }
+        console.log(`[Group-Q] Pending item saved: ${displayName} (${topic}, ${Math.round(confidence * 100)}%)`);
       }
     }
 
-    // 設定冷卻：同學員 30 分鐘內不重複通知
-    try {
-      const _r3 = getRedis();
-      await _r3.set(`coach-group-cd:${userId}`, '1', { ex: 1800 });
-    } catch (_) {}
+    // === 心得分享處理 ===
+    if (isAchievement) {
+      const draft = await generateAchievementDraftResponse(trimmed, studentContext, userId, groupContext);
+      if (!draft) {
+        console.log('[Group-A] Achievement draft generation failed, skipping');
+      } else {
+        await savePendingItem({ groupId, groupName, userId, studentName: displayName, message: trimmed, topic: 'achievement', confidence: 1, draft });
 
-    console.log(`[Group-Q] Pending item saved: ${displayName} (${topic}, ${Math.round(confidence * 100)}%)`);
+        const notifyText = `🎉${groupLabel} ${displayName} 在分享心得，好時機回覆！草稿已備好。`;
+
+        const tgToken = process.env.TELEGRAM_BOT_TOKEN;
+        const tgChat = process.env.TELEGRAM_CHAT_ID;
+        if (tgToken && tgChat) {
+          try {
+            await fetch(`https://api.telegram.org/bot${tgToken}/sendMessage`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                chat_id: tgChat,
+                text: `${notifyText}\n\n學員說：\n「${trimmed?.substring(0, 200)}」\n\n→ 查看後台：https://coach-line-bot.vercel.app/admin`,
+              }),
+            });
+          } catch (e) { console.error('[Group-A] Telegram notify error:', e); }
+        } else {
+          const coachId = process.env.COACH_USER_ID;
+          if (coachId) {
+            try {
+              await pushMessage(coachId, `${notifyText}\n到後台查看：https://coach-line-bot.vercel.app/admin`);
+            } catch (e) { console.error('[Group-A] LINE Push notify error:', e); }
+          }
+        }
+        console.log(`[Group-A] Achievement pending item saved: ${displayName}`);
+      }
+    }
   } catch (err) {
-    console.error('[Group-Q] Processing error:', err);
+    console.error('[Group] Processing error:', err);
   }
 }
 
