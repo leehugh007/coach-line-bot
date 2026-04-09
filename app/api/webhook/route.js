@@ -1064,9 +1064,34 @@ async function processBatchedMessages(userId, messages) {
     await sendMessage(lastReplyToken, userId,
       '嗨！你的課程已經結束了 ☺️\n\n' +
       '這段時間你真的進步很多，很多改變你自己可能沒感覺，但小幫手都看到了。\n\n' +
-      '如果想繼續有人陪著你、提醒你、幫你看飲食，隨時可以跟一休老師說想續報，我們會一直在 😊'
+      '如果想繼續有人陪著你、提醒你、幫你看飲食，可以跟助教說想續報，小幫手會繼續陪你 😊'
     );
     return;
+  }
+
+  // === 結業學員每日一次限制（graduating/grace）===
+  if (classStatus === 'graduating' || classStatus === 'grace') {
+    const { Redis } = await import('@upstash/redis');
+    const _rGrad = new Redis({ url: process.env.KV_REST_API_URL, token: process.env.KV_REST_API_TOKEN });
+    const gradDailyKey = `coach-grad-daily:${userId}`;
+    const todayCount = await _rGrad.get(gradDailyKey);
+    if (todayCount && parseInt(todayCount) >= 1) {
+      console.log(`[ClassCheck] ${userId?.substring(0, 8)} graduating/grace, daily limit reached`);
+      await sendMessage(lastReplyToken, userId,
+        '小幫手主要的時間要優先幫助在學的學員，所以一天只能跟你聊一次 ☺️\n\n' +
+        '如果你想像之前一樣隨時都能問，可以跟助教說想續報，小幫手會繼續全力陪你 😊'
+      );
+      await addChatMessage(userId, 'user', combinedText);
+      await addChatMessage(userId, 'assistant', '（每日限制提醒）');
+      return;
+    }
+    // 設每日計數，TTL 到台灣時間隔天 00:00
+    const now = new Date();
+    const twNow = new Date(now.getTime() + 8 * 60 * 60 * 1000);
+    const twMidnight = new Date(twNow);
+    twMidnight.setUTCHours(24, 0, 0, 0); // 隔天 00:00 台灣時間 = UTC 16:00
+    const ttl = Math.max(Math.floor((twMidnight - twNow) / 1000), 60);
+    await _rGrad.set(gradDailyKey, '1', { ex: ttl });
   }
 
   // === 客套話短路：省掉 3 次 Gemini API ===
@@ -1177,29 +1202,30 @@ async function processBatchedMessages(userId, messages) {
 
     // === 結業期間 AI 自然帶續報 ===
     let contextSuffix = '';
-    if (classStatus === 'graduating') {
-      contextSuffix += `\n\n【重要情境：這位學員的課程剛結束】
-這則回覆正常回答他的問題，但在最後自然帶一段話（不要生硬，像朋友聊天）：
+    if (classStatus === 'graduating' || classStatus === 'grace') {
+      contextSuffix += `\n\n【重要情境：這位學員的課程已結束，目前是結業寬限期】
 
-核心轉換——很多學員不想續報，不是錢的問題，是覺得「我還要再花三個月去做一件我做不到的事」。
-你的任務是讓他看到：他已經做到了，而且做到的比他以為的多。
+⚠️ 絕對禁止的說法（很重要）：
+- 不可以說「隨時都可以問我」「我一直都在」「什麼時候想聊都可以」
+- 不可以暗示他可以像以前一樣無限使用小幫手
+- 因為結業後小幫手的服務是有限的，說了會跟實際體驗衝突
 
-怎麼帶：
+正常回答他的問題，但在最後自然帶一段話（不要生硬）：
 - 點出他這幾個月已經內化的改變（他可能覺得沒什麼，但你要讓他看到）
-- 續報不是「再上三個月課」，是繼續有人陪著他、提醒他、隨時幫他看方向
-- 接下來的重點是把學到的知識變成生活的一部分，用自己的節奏繼續走
+- 續報不是「再上三個月課」，是繼續有人陪著他、提醒他、幫他看方向
+- 如果想像之前一樣有人幫忙，可以跟助教說想續報
 - 不要用「上課」「學習」這種字眼，用「有人陪著你」「繼續有人幫你看」
 
-語氣像朋友關心，不是推銷。這次對話提一次就好，不要每則都講。`;
+語氣像朋友關心，不是推銷。這次對話提一次就好。`;
     }
 
     // === 🔑 同主題重複偵測 → 簡短/總結模式 ===
     const repetition = detectTopicRepetition(chatHistory, combinedText);
     if (repetition.summarize) {
-      contextSuffix = `\n\n[重要：用戶已經反覆問同一個主題 ${repetition.count} 次了。請主動做一個重點總結（3 點以內），然後建議她如果還擔心可以直接跟一休老師說。不要再重複解釋原理。]`;
+      contextSuffix += `\n\n[重要：用戶已經反覆問同一個主題 ${repetition.count} 次了。請主動做一個重點總結（3 點以內），然後建議她如果還擔心可以直接跟一休老師說。不要再重複解釋原理。]`;
       console.log(`[MSG] Topic repetition: summarize mode (${repetition.count}x)`);
     } else if (repetition.brief) {
-      contextSuffix = `\n\n[注意：這個主題你已經解釋過了。這次直接回答她的具體問題，80 字以內，不要重複解釋原理。]`;
+      contextSuffix += `\n\n[注意：這個主題你已經解釋過了。這次直接回答她的具體問題，80 字以內，不要重複解釋原理。]`;
       console.log(`[MSG] Topic repetition: brief mode (${repetition.count}x)`);
     }
 
