@@ -1059,24 +1059,14 @@ async function processBatchedMessages(userId, messages) {
     }
   } catch (_) {}
 
+  // === expired 學員：一天一次限制（不再完全鎖死）===
   if (classStatus === 'expired') {
-    console.log(`[ClassCheck] ${userId?.substring(0, 8)} expired, blocked`);
-    await sendMessage(lastReplyToken, userId,
-      '嗨！你的課程已經結束了 ☺️\n\n' +
-      '這段時間你真的進步很多，很多改變你自己可能沒感覺，但小幫手都看到了。\n\n' +
-      '如果想繼續有人陪著你、提醒你、幫你看飲食，可以跟助教說想續報，小幫手會繼續陪你 😊'
-    );
-    return;
-  }
-
-  // === 結業學員每日一次限制（graduating/grace）===
-  if (classStatus === 'graduating' || classStatus === 'grace') {
     const { Redis } = await import('@upstash/redis');
     const _rGrad = new Redis({ url: process.env.KV_REST_API_URL, token: process.env.KV_REST_API_TOKEN });
     const gradDailyKey = `coach-grad-daily:${userId}`;
     const todayCount = await _rGrad.get(gradDailyKey);
     if (todayCount && parseInt(todayCount) >= 1) {
-      console.log(`[ClassCheck] ${userId?.substring(0, 8)} graduating/grace, daily limit reached`);
+      console.log(`[ClassCheck] ${userId?.substring(0, 8)} expired, daily limit reached`);
       await sendMessage(lastReplyToken, userId,
         '小幫手主要的時間要優先幫助在學的學員，所以一天只能跟你聊一次 ☺️\n\n' +
         '如果你想像之前一樣隨時都能問，可以跟助教說想續報，小幫手會繼續全力陪你 😊'
@@ -1089,7 +1079,7 @@ async function processBatchedMessages(userId, messages) {
     const now = new Date();
     const twNow = new Date(now.getTime() + 8 * 60 * 60 * 1000);
     const twMidnight = new Date(twNow);
-    twMidnight.setUTCHours(24, 0, 0, 0); // 隔天 00:00 台灣時間 = UTC 16:00
+    twMidnight.setUTCHours(24, 0, 0, 0);
     const ttl = Math.max(Math.floor((twMidnight - twNow) / 1000), 60);
     await _rGrad.set(gradDailyKey, '1', { ex: ttl });
   }
