@@ -1193,20 +1193,43 @@ async function processBatchedMessages(userId, messages) {
     // === 結業期間 AI 自然帶續報 ===
     let contextSuffix = '';
     if (classStatus === 'graduating' || classStatus === 'grace') {
+      // 檢查：學員是否已說過續報 / 已經提過續報引導
+      const renewalKeywords = ['續報', '繼續報', '我有報', '已經報了', '報名了', '我報了'];
+      const alreadyRenewed = chatHistory.some(m =>
+        m.role === 'user' && renewalKeywords.some(kw => m.content?.includes(kw))
+      ) || combinedText && renewalKeywords.some(kw => combinedText.includes(kw));
+
+      const { Redis: _Redis } = await import('@upstash/redis');
+      const _rRenewal = new _Redis({ url: process.env.KV_REST_API_URL, token: process.env.KV_REST_API_TOKEN });
+      const renewalMentionedKey = `coach-renewal-mentioned:${userId}`;
+      const alreadyMentioned = await _rRenewal.get(renewalMentionedKey);
+
       contextSuffix += `\n\n【重要情境：這位學員的課程已結束，目前是結業寬限期】
 
 ⚠️ 絕對禁止的說法（很重要）：
 - 不可以說「隨時都可以問我」「我一直都在」「什麼時候想聊都可以」
 - 不可以暗示他可以像以前一樣無限使用小幫手
-- 因為結業後小幫手的服務是有限的，說了會跟實際體驗衝突
+- 因為結業後小幫手的服務是有限的，說了會跟實際體驗衝突`;
 
-正常回答他的問題，但在最後自然帶一段話（不要生硬）：
-- 點出他這幾個月已經內化的改變（他可能覺得沒什麼，但你要讓他看到）
-- 續報不是「再上三個月課」，是繼續有人陪著他、提醒他、幫他看方向
-- 如果想像之前一樣有人幫忙，可以跟助教說想續報
-- 不要用「上課」「學習」這種字眼，用「有人陪著你」「繼續有人幫你看」
-
-語氣像朋友關心，不是推銷。這次對話提一次就好。`;
+      if (alreadyRenewed) {
+        // 學員已說續報 → 不再提，正常回覆 + 肯定
+        contextSuffix += `\n\n這位學員已經決定續報了。不要再提續報的事，正常回答問題就好。可以自然地肯定他的決定（但不用每次都提），像朋友一樣聊天。`;
+        console.log(`[Graduating] ${userId?.substring(0, 8)} already renewed, skip renewal prompt`);
+      } else if (alreadyMentioned) {
+        // 已經提過一次續報 → 不再提
+        contextSuffix += `\n\n你之前已經跟這位學員提過續報的事了，不要再提。正常回答問題就好。`;
+        console.log(`[Graduating] ${userId?.substring(0, 8)} renewal already mentioned, skip`);
+      } else {
+        // 第一次 → 自然帶一次續報，然後記錄
+        contextSuffix += `\n\n正常回答他的問題，在最後自然帶一段話（不要生硬）：
+- 點出他這幾個月已經內化的改變
+- 如果想繼續有人陪著看方向，可以跟助教聊聊續報
+- 不要用「上課」「學習」，用「有人陪著你」「繼續有人幫你看」
+語氣像朋友關心，不是推銷。`;
+        // 標記已提過，整個寬限期不再提（10 天 TTL）
+        await _rRenewal.set(renewalMentionedKey, '1', { ex: 86400 * 10 });
+        console.log(`[Graduating] ${userId?.substring(0, 8)} first renewal mention`);
+      }
     }
 
     // === 🔑 同主題重複偵測 → 簡短/總結模式 ===
