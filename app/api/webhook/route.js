@@ -1217,18 +1217,23 @@ async function processBatchedMessages(userId, messages) {
         console.log(`[Graduating] ${userId?.substring(0, 8)} already renewed, skip renewal prompt`);
       } else if (alreadyMentioned) {
         // 已經提過一次續報 → 不再提
-        contextSuffix += `\n\n你之前已經跟這位學員提過續報的事了，不要再提。正常回答問題就好。`;
-        console.log(`[Graduating] ${userId?.substring(0, 8)} renewal already mentioned, skip`);
+        contextSuffix += `\n\n今天已經跟這位學員提過續報了，這次不要再提。正常回答問題就好。`;
+        console.log(`[Graduating] ${userId?.substring(0, 8)} renewal already mentioned today, skip`);
       } else {
-        // 第一次 → 自然帶一次續報，然後記錄
+        // 今天第一次對話 → 自然帶一次續報，然後記錄到當天結束
         contextSuffix += `\n\n正常回答他的問題，在最後自然帶一段話（不要生硬）：
 - 點出他這幾個月已經內化的改變
 - 如果想繼續有人陪著看方向，可以跟助教聊聊續報
 - 不要用「上課」「學習」，用「有人陪著你」「繼續有人幫你看」
 語氣像朋友關心，不是推銷。`;
-        // 標記已提過，整個寬限期不再提（10 天 TTL）
-        await _rRenewal.set(renewalMentionedKey, '1', { ex: 86400 * 10 });
-        console.log(`[Graduating] ${userId?.substring(0, 8)} first renewal mention`);
+        // 標記今天已提過，TTL 到台灣時間隔天 00:00
+        const _now = new Date();
+        const _twNow = new Date(_now.getTime() + 8 * 60 * 60 * 1000);
+        const _twMid = new Date(_twNow);
+        _twMid.setUTCHours(24, 0, 0, 0);
+        const _ttl = Math.max(Math.floor((_twMid - _twNow) / 1000), 60);
+        await _rRenewal.set(renewalMentionedKey, '1', { ex: _ttl });
+        console.log(`[Graduating] ${userId?.substring(0, 8)} renewal mentioned, ttl=${_ttl}s`);
       }
     }
 
