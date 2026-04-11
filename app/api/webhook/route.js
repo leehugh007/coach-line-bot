@@ -1316,8 +1316,141 @@ async function backgroundTagProcessing(userId, userText, aiReply) {
     }
 
     // journey/summary 背景更新已停用（2026-04-03）
-    // 原因：journey 累積式摘要會過時導致鬼打牆，改用即時 coaching_tags
-    // Portrait 改用 tags + 原話，不再依賴 journey
+
+    // --- 🔑 糾正偵測：code gate + AI 判定 + code 清理 ---
+    // Renee 蘿蔔乾事件（2026-04-08）：tags 記了蘿蔔乾，學員說「我沒吃蘿蔔乾」但 AI 繼續提。
+    // 做法：① code 偵測否定詞（gate，過濾 99% 訊息）
+    //       ② AI 判定「用戶在永久糾正什麼」（理解語意，不誤殺）
+    //       ③ code 拿 AI 回傳的關鍵字清三層（tags + goals + Redis cache）
+    try {
+      // 只用強否定詞觸發，避免「好了我知道了」「沒問題我試試」誤觸
+      const NEGATION_WORDS = ['根本沒', '從來沒', '我沒有在', '一直都很好',
+        '不用擔心', '沒有問題', '出院', '沒有在', '才沒有', '哪有'];
+      const hasNegation = NEGATION_WORDS.some(w => userText.includes(w));
+
+      if (hasNegation) {
+        // 收集系統記住的東西，讓 AI 知道上下文
+        const { getSupabase } = await import('@/lib/supabase');
+        const sb = getSupabase();
+        const corrUser = await getUser(userId);
+
+        // 從最近 tags + goals 組裝系統記憶
+        const recentTags = await getRecentTopics(userId, 15);
+        const activeGoal = await getActiveGoal(userId);
+        const systemMemory = [
+          recentTags.length ? `最近對話標籤：${recentTags.map(t => t.core_issue || t.tag).filter(Boolean).join('、')}` : '',
+          activeGoal ? `目標：${activeGoal.goal_text}` : '',
+          corrUser?.info?.goal ? `個人目標：${corrUser.info.goal}` : '',
+        ].filter(Boolean).join('\n');
+
+        if (systemMemory) {
+          let matchedTopics = [];
+          try {
+            const aiPrompt = `用戶說：「${userText.substring(0, 200)}」
+
+系統目前記住的：
+${systemMemory}
+
+判斷：用戶有沒有在「永久糾正」系統記錯的事？
+
+永久糾正 = 用戶明確說某件事「根本不是事實」或「從來就沒有」。例如：
+- 「我根本沒吃蘿蔔乾」= 系統以為有吃，但沒有 → ["蘿蔔乾"]
+- 「膝蓋沒問題」= 系統以為有問題，但沒有 → ["膝蓋"]
+- 「那是我媽的不是我的」= 系統記錯人了 → ["相關主題"]
+
+不是糾正（不要列）：
+- 「今天不超慢跑」= 今天的選擇，不代表沒有這個習慣
+- 「最近沒有跳舞」= 暫時沒做，但還是她的習慣
+- 「好的沒問題」= 回應對方，不是糾正
+
+只回傳被永久糾正的核心詞 JSON 陣列（2-4字）。沒有就回 []`;
+
+            const GEMINI_KEY = process.env.GEMINI_API_KEY;
+            const aiRes = await fetch(
+              `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${GEMINI_KEY}`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  contents: [{ role: 'user', parts: [{ text: aiPrompt }] }],
+                  generationConfig: { temperature: 0, maxOutputTokens: 100, thinkingConfig: { thinkingBudget: 0 } },
+                }),
+              }
+            );
+
+            if (aiRes.ok) {
+              const aiData = await aiRes.json();
+              if (userId) {
+                const { trackApiUsage } = await import('@/lib/cost-tracker');
+                trackApiUsage(userId, 'correction_detect', 'gemini-2.5-flash-lite', aiData);
+              }
+              const aiText = aiData?.candidates?.[0]?.content?.parts?.filter(p => p.text).pop()?.text?.trim() || '[]';
+              const jsonMatch = aiText.match(/\[[\s\S]*?\]/);
+              if (jsonMatch) {
+                const parsed = JSON.parse(jsonMatch[0]);
+                if (Array.isArray(parsed)) {
+                  matchedTopics = parsed.filter(t => typeof t === 'string' && t.length >= 2);
+                }
+              }
+            }
+            console.log(`[Correction] AI detected: ${JSON.stringify(matchedTopics)}`);
+          } catch (aiErr) {
+            console.error('[Correction] AI detection failed (non-fatal):', aiErr.message);
+          }
+
+          // Code 清理：三層
+          if (matchedTopics.length > 0) {
+            // Redis 連線共用（不在迴圈內重複建立）
+            let _rCorr;
+            try {
+              const { Redis } = await import('@upstash/redis');
+              _rCorr = new Redis({ url: process.env.KV_REST_API_URL, token: process.env.KV_REST_API_TOKEN });
+            } catch (_) {}
+
+            for (const topic of matchedTopics) {
+              console.log(`[Correction] Cleaning: "${topic}"`);
+
+              // 1. Supabase coaching_tags：刪含關鍵字的整筆
+              if (sb) {
+                try {
+                  const { data: deleted } = await sb.from('coaching_tags')
+                    .delete()
+                    .eq('user_id', userId)
+                    .or(`core_issue.ilike.%${topic}%,progress_detail.ilike.%${topic}%`)
+                    .select('id');
+                  console.log(`[Correction] Deleted ${deleted?.length || 0} tags containing "${topic}"`);
+                } catch (e) {
+                  console.error(`[Correction] Tag cleanup error:`, e.message);
+                }
+
+                // 2. Supabase goals：刪含關鍵字的目標
+                try {
+                  await sb.from('goals')
+                    .update({ status: 'replaced' })
+                    .eq('user_id', userId)
+                    .eq('status', 'active')
+                    .ilike('goal_text', `%${topic}%`);
+                } catch (e) { /* non-fatal */ }
+              }
+            }
+
+            // 3. Redis cache：清一次就好（不用每個 topic 清一次）
+            if (_rCorr) {
+              try {
+                await Promise.all([
+                  _rCorr.del(`coach:${userId}:topics`),
+                  _rCorr.del(`coach:${userId}:summary`),
+                  _rCorr.del(`coach:${userId}:journey`),
+                ]);
+                console.log(`[Correction] Redis cache cleared for ${userId?.substring(0, 8)}`);
+              } catch (e) { /* non-fatal */ }
+            }
+          }
+        }
+      }
+    } catch (corrErr) {
+      console.error('[Correction] Error (non-fatal):', corrErr.message);
+    }
   } catch (err) {
     console.error('[Tags] Background processing error:', err);
   }
