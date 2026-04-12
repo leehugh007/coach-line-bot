@@ -1269,8 +1269,8 @@ async function processBatchedMessages(userId, messages) {
     const result = await sendMessage(lastReplyToken, userId, reply);
     console.log(`[MSG] Reply sent via ${result.method} (${reply.length} chars)`);
 
-    // === 背景：標籤抽取 & 趨勢更新 ===
-    backgroundTagProcessing(userId, combinedText, reply).catch(err =>
+    // === 標籤抽取 & 糾正偵測（await 確保 Vercel 不會提前終止）===
+    await backgroundTagProcessing(userId, combinedText, reply).catch(err =>
       console.error('[Tags] Background error:', err)
     );
 
