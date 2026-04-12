@@ -582,7 +582,158 @@ async function handleEveningPush(sb, r, users, classMap, now) {
     }
   }
 
+  // === 糾正偵測兜底：掃當天含否定詞的對話，補抓即時偵測漏掉的 ===
+  try {
+    await reconcileCorrectionCheck(sb, r);
+  } catch (e) {
+    console.error('[Reconcile] Error (non-fatal):', e.message);
+  }
+
   return { pushed, total: users.length, log };
+}
+
+/**
+ * 糾正偵測兜底：每天 evening cron 掃一次
+ * 找當天有對話的用戶，掃含否定詞的訊息，AI 判定後清理
+ */
+async function reconcileCorrectionCheck(sb, r) {
+  const NEGATION_WORDS = ['沒問題', '沒事', '不用擔心', '沒有問題', '不需要',
+    '沒什麼', '沒有在', '沒有', '不是', '好了', '出院'];
+
+  // 查今天有新對話的用戶（台灣時間今天 00:00 之後）
+  const twNow = new Date(Date.now() + 8 * 60 * 60 * 1000);
+  const todayStart = new Date(twNow);
+  todayStart.setUTCHours(0, 0, 0, 0);
+  const todayStartUTC = new Date(todayStart.getTime() - 8 * 60 * 60 * 1000);
+
+  const { data: todayConvs } = await sb.from('conversations')
+    .select('user_id, content')
+    .eq('role', 'user')
+    .gte('created_at', todayStartUTC.toISOString())
+    .order('created_at', { ascending: false });
+
+  if (!todayConvs || todayConvs.length === 0) return;
+
+  // 按用戶分組，找含否定詞的
+  const userNegations = {};
+  for (const conv of todayConvs) {
+    if (!conv.content) continue;
+    const hasNeg = NEGATION_WORDS.some(w => conv.content.includes(w));
+    if (hasNeg) {
+      if (!userNegations[conv.user_id]) userNegations[conv.user_id] = [];
+      userNegations[conv.user_id].push(conv.content);
+    }
+  }
+
+  const userIds = Object.keys(userNegations);
+  if (userIds.length === 0) {
+    console.log('[Reconcile] No negation messages today');
+    return;
+  }
+
+  // 檢查哪些用戶今天已被即時偵測處理過（避免重複清理）
+  let cleaned = 0;
+  for (const uid of userIds) {
+    const reconcileKey = `coach-reconcile:${uid}`;
+    const already = await r.get(reconcileKey);
+    if (already) continue; // 今天已處理
+
+    // 先標記已處理，避免 AI call 成功但後續步驟失敗導致重複清理
+    await r.set(reconcileKey, '1', { ex: 86400 });
+
+    const msgs = userNegations[uid].slice(0, 3).join('\n'); // 最多取 3 則
+
+    // 組裝系統記憶
+    const { data: recentTags } = await sb.from('coaching_tags')
+      .select('core_issue')
+      .eq('user_id', uid)
+      .order('created_at', { ascending: false })
+      .limit(15);
+    const { data: activeGoals } = await sb.from('goals')
+      .select('goal_text')
+      .eq('user_id', uid)
+      .eq('status', 'active')
+      .limit(3);
+
+    const systemMemory = [
+      recentTags?.length ? `最近對話標籤：${recentTags.map(t => t.core_issue).filter(Boolean).join('、')}` : '',
+      activeGoals?.length ? `目標：${activeGoals.map(g => g.goal_text).join('、')}` : '',
+    ].filter(Boolean).join('\n');
+
+    if (!systemMemory) continue;
+
+    // AI 判定
+    try {
+      const aiPrompt = `用戶今天說了這些：「${msgs.substring(0, 300)}」
+
+系統目前記住的：
+${systemMemory}
+
+判斷：用戶有沒有在「永久糾正」系統記錯的事？
+
+永久糾正 = 用戶明確說某件事「根本不是事實」或「從來就沒有」。例如：
+- 「我根本沒吃蘿蔔乾」= 系統以為有吃，但沒有 → ["蘿蔔乾"]
+- 「膝蓋沒問題」= 系統以為有問題，但沒有 → ["膝蓋"]
+- 「腎臟發炎是我爸爸的不是我的」= 系統記錯人了 → ["腎臟發炎"]
+
+不是糾正（不要列）：
+- 「今天不超慢跑」= 今天的選擇，不代表沒有這個習慣
+- 「最近沒有跳舞」= 暫時沒做，但還是她的習慣
+- 「好的沒問題」= 回應對方，不是糾正
+
+只回傳被永久糾正的核心詞 JSON 陣列（2-4字）。沒有就回 []`;
+
+      const GEMINI_KEY = process.env.GEMINI_API_KEY;
+      const aiRes = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${GEMINI_KEY}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ role: 'user', parts: [{ text: aiPrompt }] }],
+            generationConfig: { temperature: 0, maxOutputTokens: 100, thinkingConfig: { thinkingBudget: 0 } },
+          }),
+        }
+      );
+
+      if (aiRes.ok) {
+        const aiData = await aiRes.json();
+        try {
+          const { trackApiUsage } = await import('@/lib/cost-tracker');
+          trackApiUsage(uid, 'reconcile_correction', 'gemini-2.5-flash-lite', aiData);
+        } catch (_) {}
+
+        const aiText = aiData?.candidates?.[0]?.content?.parts?.filter(p => p.text).pop()?.text?.trim() || '[]';
+        const jsonMatch = aiText.match(/\[[\s\S]*?\]/);
+        if (jsonMatch) {
+          const topics = JSON.parse(jsonMatch[0]).filter(t => typeof t === 'string' && t.length >= 2);
+          for (const topic of topics) {
+            console.log(`[Reconcile] Cleaning "${topic}" for ${uid.substring(0, 8)}`);
+            // 清 coaching_tags
+            await sb.from('coaching_tags').delete()
+              .eq('user_id', uid)
+              .or(`core_issue.ilike.%${topic}%,progress_detail.ilike.%${topic}%`);
+            // 清 goals
+            await sb.from('goals').update({ status: 'replaced' })
+              .eq('user_id', uid).eq('status', 'active')
+              .ilike('goal_text', `%${topic}%`);
+            cleaned++;
+          }
+          if (topics.length > 0) {
+            // 清 Redis cache
+            await Promise.allSettled([
+              r.del(`coach:${uid}:topics`),
+              r.del(`coach:${uid}:summary`),
+              r.del(`coach:${uid}:journey`),
+            ]);
+          }
+        }
+      }
+    } catch (e) {
+      console.error(`[Reconcile] AI error for ${uid.substring(0, 8)}:`, e.message);
+    }
+  }
+  console.log(`[Reconcile] Checked ${userIds.length} users, cleaned ${cleaned} topics`);
 }
 
 // ===================================================================
