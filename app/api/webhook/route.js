@@ -1293,28 +1293,27 @@ async function processBatchedMessages(userId, messages) {
 async function backgroundTagProcessing(userId, userText, aiReply) {
   try {
     const tags = await extractCoachingTags(userText, aiReply, userId);
-    if (!tags) return;
+    if (tags) {
+      const totalTopics = await saveCoachingTags(userId, tags);
+      console.log(`[Tags] Saved: ${tags.topic}/${tags.emotion}, total: ${totalTopics}`);
 
-    const totalTopics = await saveCoachingTags(userId, tags);
-    console.log(`[Tags] Saved: ${tags.topic}/${tags.emotion}, total: ${totalTopics}`);
+      // === 目標系統：偵測到新目標 → 只有沒有進行中目標時才儲存 ===
+      if (tags.goal_action) {
+        const existingGoal = await getActiveGoal(userId);
+        if (!existingGoal) {
+          await setGoal(userId, tags.goal_action, tags.core_issue);
+          console.log(`[Goal] New goal set: ${tags.goal_action}`);
+        } else {
+          console.log(`[Goal] Skipped (active goal exists): ${existingGoal.goal_text}`);
+        }
+      }
 
-    // === 目標系統：偵測到新目標 → 只有沒有進行中目標時才儲存 ===
-    if (tags.goal_action) {
-      const existingGoal = await getActiveGoal(userId);
-      if (!existingGoal) {
-        await setGoal(userId, tags.goal_action, tags.core_issue);
-        console.log(`[Goal] New goal set: ${tags.goal_action}`);
-      } else {
-        console.log(`[Goal] Skipped (active goal exists): ${existingGoal.goal_text}`);
+      // === 目標系統：偵測到目標完成 → 標記完成 ===
+      if (tags.goal_completed === true) {
+        await completeGoal(userId);
+        console.log(`[Goal] Goal completed for ${userId?.substring(0, 8)}`);
       }
     }
-
-    // === 目標系統：偵測到目標完成 → 標記完成 ===
-    if (tags.goal_completed === true) {
-      await completeGoal(userId);
-      console.log(`[Goal] Goal completed for ${userId?.substring(0, 8)}`);
-    }
-
     // journey/summary 背景更新已停用（2026-04-03）
   } catch (err) {
     console.error('[Tags] Background processing error:', err);
