@@ -1316,8 +1316,11 @@ async function backgroundTagProcessing(userId, userText, aiReply) {
     }
 
     // journey/summary 背景更新已停用（2026-04-03）
+  } catch (err) {
+    console.error('[Tags] Background processing error:', err);
+  }
 
-    // --- 🔑 糾正偵測：code gate + AI 判定 + code 清理 ---
+  // --- 🔑 糾正偵測（獨立於 tags 提取，不受 extractCoachingTags 失敗影響）---
     // Renee 蘿蔔乾事件（2026-04-08）：tags 記了蘿蔔乾，學員說「我沒吃蘿蔔乾」但 AI 繼續提。
     // 做法：① code 偵測否定詞（gate，過濾 99% 訊息）
     //       ② AI 判定「用戶在永久糾正什麼」（理解語意，不誤殺）
@@ -1451,9 +1454,6 @@ ${systemMemory}
     } catch (corrErr) {
       console.error('[Correction] Error (non-fatal):', corrErr.message);
     }
-  } catch (err) {
-    console.error('[Tags] Background processing error:', err);
-  }
 }
 
 // ===== 私訊崩潰訊號偵測 =====
