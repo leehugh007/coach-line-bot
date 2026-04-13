@@ -1084,6 +1084,21 @@ async function processBatchedMessages(userId, messages) {
     await _rGrad.set(gradDailyKey, '1', { ex: ttl });
   }
 
+  // === Code enforcement：照片能力限制（prompt 寫了但模型不遵守，必須 code 攔）===
+  const PHOTO_KEYWORDS = ['看照片', '傳照片', '拍照', '傳圖', '看圖', '看照', '傳張', '拍給你', '照片給你', '成分表照', '看成分表'];
+  const asksAboutPhoto = PHOTO_KEYWORDS.some(kw => combinedText.includes(kw));
+  if (asksAboutPhoto) {
+    console.log(`[PhotoBlock] ${userId?.substring(0, 8)}: "${combinedText.substring(0, 40)}"`);
+    const photoReply = '我沒辦法看照片，但你用文字跟我說吃了什麼，我一樣能幫你 😊\n\n例如跟我說「滷雞腿、青菜兩份、半碗飯」，我就能幫你看搭配。如果想確認成分表，把前幾項成分打字給我就好！';
+    await sendMessage(lastReplyToken, userId, photoReply);
+    await Promise.all([
+      addChatMessage(userId, 'user', combinedText),
+      addChatMessage(userId, 'assistant', photoReply),
+      recordInteraction(userId),
+    ]);
+    return;
+  }
+
   // === 客套話短路：省掉 3 次 Gemini API ===
   const quickReply = getQuickReply(combinedText);
   if (quickReply) {
