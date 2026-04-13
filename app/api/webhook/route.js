@@ -1084,19 +1084,43 @@ async function processBatchedMessages(userId, messages) {
     await _rGrad.set(gradDailyKey, '1', { ex: ttl });
   }
 
-  // === Code enforcement：照片能力限制（prompt 寫了但模型不遵守，必須 code 攔）===
+  // === Code enforcement：照片能力限制（code gate + AI 判定，不誤殺）===
   const PHOTO_KEYWORDS = ['看照片', '傳照片', '拍照', '傳圖', '看圖', '看照', '傳張', '拍給你', '照片給你', '成分表照', '看成分表'];
-  const asksAboutPhoto = PHOTO_KEYWORDS.some(kw => combinedText.includes(kw));
-  if (asksAboutPhoto) {
-    console.log(`[PhotoBlock] ${userId?.substring(0, 8)}: "${combinedText.substring(0, 40)}"`);
-    const photoReply = '我沒辦法看照片，但你用文字跟我說吃了什麼，我一樣能幫你 😊\n\n例如跟我說「滷雞腿、青菜兩份、半碗飯」，我就能幫你看搭配。如果想確認成分表，把前幾項成分打字給我就好！';
-    await sendMessage(lastReplyToken, userId, photoReply);
-    await Promise.all([
-      addChatMessage(userId, 'user', combinedText),
-      addChatMessage(userId, 'assistant', photoReply),
-      recordInteraction(userId),
-    ]);
-    return;
+  const hasPhotoKeyword = PHOTO_KEYWORDS.some(kw => combinedText.includes(kw));
+  if (hasPhotoKeyword) {
+    // AI 輕量判定：學員是在問小幫手能不能看照片，還是只是提到拍照
+    try {
+      const GEMINI_KEY = process.env.GEMINI_API_KEY;
+      const judgeRes = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${GEMINI_KEY}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ role: 'user', parts: [{ text: `學員說：「${combinedText.substring(0, 200)}」\n\n判斷：學員是在「要求你看照片/傳照片給你/問你能不能看照片」嗎？\n\n是 = 學員期待你能處理圖片（例如「你可以看照片嗎」「我傳照片給你」「幫我看這張」）\n不是 = 學員只是在對話中提到拍照這個動作（例如「我習慣拍照記錄飲食」「之前有拍照」）\n\n只回答 YES 或 NO` }] }],
+            generationConfig: { temperature: 0, maxOutputTokens: 10, thinkingConfig: { thinkingBudget: 0 } },
+          }),
+        }
+      );
+      if (judgeRes.ok) {
+        const judgeData = await judgeRes.json();
+        const judgeText = judgeData?.candidates?.[0]?.content?.parts?.filter(p => p.text).pop()?.text?.trim() || '';
+        if (judgeText.toUpperCase().includes('YES')) {
+          console.log(`[PhotoBlock] ${userId?.substring(0, 8)}: confirmed asking about photo ability`);
+          const photoReply = '我沒辦法看照片，但你用文字跟我說吃了什麼，我一樣能幫你 😊\n\n例如跟我說「滷雞腿、青菜兩份、半碗飯」，我就能幫你看搭配。如果想確認成分表，把前幾項成分打字給我就好！';
+          await sendMessage(lastReplyToken, userId, photoReply);
+          await Promise.all([
+            addChatMessage(userId, 'user', combinedText),
+            addChatMessage(userId, 'assistant', photoReply),
+            recordInteraction(userId),
+          ]);
+          return;
+        }
+        console.log(`[PhotoBlock] ${userId?.substring(0, 8)}: not asking about photo, pass through`);
+      }
+    } catch (e) {
+      console.error('[PhotoBlock] AI judge error (pass through):', e.message);
+    }
   }
 
   // === 客套話短路：省掉 3 次 Gemini API ===
