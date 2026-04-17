@@ -25,7 +25,7 @@ import {
   getPendingVerify, clearPendingVerify, tryMatchByRealName,
   setPendingClassSelect, getPendingClassSelect, clearPendingClassSelect,
   getActiveClassNames, getActiveGoal, setGoal, completeGoal,
-  recordStreak, getStreak,
+  recordStreak, getStreak, getClassStats, isFirstInteractionToday,
 } from '@/lib/user';
 import {
   extractCoachingTags, saveCoachingTags,
@@ -206,21 +206,60 @@ async function handleGroupMessage(source, userId, text, mention) {
     }
   }
 
-  // 2. 偵測自我介紹（存入用戶資料，但不觸發通知）
+  // 2. 偵測自我介紹（存入用戶資料 + 通知教練產草稿）
   if (looksLikeIntroduction(trimmed)) {
     console.log(`[Group] Self-intro detected from ${displayName} in group ${groupId?.substring(0, 8)}`);
-    try {
-      await processIntroduction(userId, trimmed);
-      const user = await getUser(userId);
-      if (user) {
-        user.lineDisplayName = displayName;
-        const { saveUser } = await import('@/lib/user');
-        await saveUser(userId, user);
+
+    const introBackground = async () => {
+      // 2a. 存個人資料
+      try {
+        await processIntroduction(userId, trimmed);
+        const user = await getUser(userId);
+        if (user) {
+          user.lineDisplayName = displayName;
+          const { saveUser } = await import('@/lib/user');
+          await saveUser(userId, user);
+        }
+      } catch (err) {
+        console.error('[Group] Intro processing error:', err);
       }
-    } catch (err) {
-      console.error('[Group] Intro processing error:', err);
+
+      // 2b. 通知教練：產草稿 + 送 pending + push 通知
+      try {
+        let groupName = '';
+        try {
+          const summary = await getGroupSummary(groupId);
+          if (summary?.groupName) groupName = summary.groupName;
+        } catch (_) {}
+        const groupLabel = groupName ? `【${groupName}】` : '';
+
+        const draft = await generateDraftResponse(trimmed, '', userId, []);
+        if (draft) {
+          await savePendingItem({
+            groupId,
+            groupName: groupLabel,
+            userId,
+            studentName: displayName,
+            message: trimmed,
+            topic: 'self_intro',
+            draft,
+          });
+
+          const notifyTargets = [process.env.COACH_USER_ID, process.env.STAFF_USER_ID].filter(Boolean);
+          const notifyMsg = `${groupLabel} 🟢 新學員自我介紹\n學員：${displayName}\n\n後台有草稿，可以去複製回覆 ☺️`;
+          await Promise.all(notifyTargets.map(id => pushMessage(id, notifyMsg).catch(() => {})));
+        }
+      } catch (err) {
+        console.error('[Group] Intro notify error:', err);
+      }
+    };
+
+    if (globalThis.__nextWaitUntil) {
+      globalThis.__nextWaitUntil(introBackground());
+    } else {
+      introBackground().catch(err => console.error('[Group] Intro bg error:', err));
     }
-    return; // 自介只存資料，不通知教練
+    return;
   }
 
   // 2.5 排除工作人員 — 他們是回答者不是提問者
@@ -1187,6 +1226,9 @@ async function processBatchedMessages(userId, messages) {
       console.log(`[Intro] Detected for ${userId?.substring(0, 8)}, processing...`);
     }
 
+    // === 記錄「今天第一次互動」狀態（recordInteraction 前，否則 lastInteractionAt 已更新）===
+    const isFirstToday = isFirstInteractionToday(user);
+
     // === 記錄互動 & streak ===
     const updatedUser = await recordInteraction(userId);
     recordStreak(userId).catch(() => {}); // 非阻塞
@@ -1298,7 +1340,19 @@ async function processBatchedMessages(userId, messages) {
     }
 
     // === AI 回覆（用合併後的完整文字，傳入預計算的意圖）===
-    const reply = await handleMessage(combinedText, chatHistory, userContext + contextSuffix, milestone, intent, userId);
+    let reply = await handleMessage(combinedText, chatHistory, userContext + contextSuffix, milestone, intent, userId);
+
+    // === 場景 1：群體存在感（每天第一次互動帶一句）===
+    if (isFirstToday && contextUser?.class_name) {
+      try {
+        const classStats = await getClassStats(contextUser.class_name);
+        if (classStats && classStats.todayUniqueUsers > 0) {
+          reply += `\n\n今天已經有 ${classStats.todayUniqueUsers} 位同學跟我聊過了，你也到了 💪`;
+        }
+      } catch (e) {
+        console.error('[GroupPresence] Error (non-fatal):', e.message);
+      }
+    }
 
     // === 儲存對話（存合併後的完整文字）===
     await addChatMessage(userId, 'user', combinedText);
