@@ -1340,19 +1340,15 @@ async function processBatchedMessages(userId, messages) {
     }
 
     // === AI 回覆（用合併後的完整文字，傳入預計算的意圖）===
-    let reply = await handleMessage(combinedText, chatHistory, userContext + contextSuffix, milestone, intent, userId);
+    const reply = await handleMessage(combinedText, chatHistory, userContext + contextSuffix, milestone, intent, userId);
 
-    // === 場景 1：群體存在感（每天第一次互動帶一句）===
-    if (isFirstToday && contextUser?.class_name) {
-      try {
-        const classStats = await getClassStats(contextUser.class_name);
-        if (classStats && classStats.todayUniqueUsers > 0) {
-          reply += `\n\n今天已經有 ${classStats.todayUniqueUsers} 位同學跟我聊過了，你也到了 💪`;
-        }
-      } catch (e) {
-        console.error('[GroupPresence] Error (non-fatal):', e.message);
-      }
-    }
+    // === 場景 1：群體存在感 — 暫時停用（2026-04-17 發現問題）===
+    // 停用原因：
+    // 1. 欄位名不一致：Redis profile 有 className（preload）vs class_name（續報換班）兩種
+    //    續報學員會中槍，新生不觸發 → 體驗不一致
+    // 2. 數字=1 反效果：「今天已經有 1 位同學聊過了」= 確認孤立（玉玲 2026-04-19 案例）
+    // 3. 破壞對話氛圍：結業/續報/情感深度場合尾巴接罐頭句 = AI 沒在聽
+    // 重新設計需要：閾值門檻 + 場景過濾 + 欄位統一 + 話術動態
 
     // === 儲存對話（存合併後的完整文字）===
     await addChatMessage(userId, 'user', combinedText);
