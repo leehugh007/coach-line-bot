@@ -479,10 +479,10 @@ export default function StudentsPage() {
                     {/* 續報狀態：confirmed_at 優先於 intent */}
                     {s.renewal_confirmed_at ? (
                       <span
-                        title={`已確認續報：${new Date(s.renewal_confirmed_at).toLocaleDateString('zh-TW')}`}
+                        title={`本班期已繳費：${new Date(s.renewal_confirmed_at).toLocaleDateString('zh-TW')}（換班會重置）`}
                         style={{ fontSize: 11, padding: '1px 8px', borderRadius: 10, background: '#E0F7FA', color: '#00695C', fontWeight: 700 }}
                       >
-                        ✓ 已續報
+                        ✓ 本期已繳費
                       </span>
                     ) : (() => {
                       const b = renewalBadge(s.renewal_intent);
@@ -542,24 +542,24 @@ export default function StudentsPage() {
                         s.renewal_confirmed_at ? (
                           <button
                             onClick={() => {
-                              if (confirm(`取消 ${s.display_name || '這位學員'} 的已續報標記？`)) {
+                              if (confirm(`取消 ${s.display_name || '這位學員'} 的「本期已繳費」標記？`)) {
                                 updateRenewal(s.id, false);
                               }
                             }}
                             style={{ padding: '4px 8px', border: '1px solid #00695C', borderRadius: 6, fontSize: 11, cursor: 'pointer', background: '#E0F7FA', color: '#00695C', fontWeight: 600 }}
-                            title="點此取消已續報">
-                            ✓續
+                            title="點此取消本期已繳費標記">
+                            ✓已繳費
                           </button>
                         ) : (
                           <button
                             onClick={() => {
-                              if (confirm(`確認 ${s.display_name || '這位學員'} 已完成續報？\n\n確認後：\n- 小幫手永遠不再提續報\n- 可隨時取消`)) {
+                              if (confirm(`標記 ${s.display_name || '這位學員'} 已完成本班期續報繳費？\n\n標記後：\n- 小幫手在本班期內不再提續報\n- 學員轉去下一班時會自動重置（新班 w10/w11/w12 照常推）\n- 可隨時取消`)) {
                                 updateRenewal(s.id, true);
                               }
                             }}
                             style={{ padding: '4px 8px', border: '1px solid #ddd', borderRadius: 6, fontSize: 11, cursor: 'pointer', background: 'white', color: '#00695C' }}
-                            title="標記已完成續報">
-                            確認續報
+                            title="標記本班期已繳費，本班期不再推銷續報">
+                            標已繳費
                           </button>
                         )
                       )}

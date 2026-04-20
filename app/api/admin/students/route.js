@@ -53,9 +53,11 @@ export async function POST(request) {
     updates.renewal_confirmed_at = confirmRenewal ? new Date().toISOString() : null;
   }
 
-  // className — T7 觸發源 B（契約 §5）
+  // className — T7 觸發源 B（契約 §5，2026-04-20 修訂）
   // 1) 先 SELECT 舊 class_name 比對
-  // 2) 若新舊不同（包含 NULL 清空 = 退費）→ 同步清 renewal_intent / _at / _source（保留 confirmed_at）
+  // 2) 若新舊不同 → 同步清全部 4 個 renewal 欄位（含 confirmed_at）
+  //    理由：renewal_confirmed_at 是「本班期已完成續報」狀態，換班 = 新一輪
+  //    新班級的 w10/w11/w12 應照常推（問續報下一期）
   if (className !== undefined) {
     const newClass = className || null;
     updates.class_name = newClass;
@@ -71,12 +73,12 @@ export async function POST(request) {
         updates.renewal_intent = null;
         updates.renewal_intent_at = null;
         updates.renewal_intent_source = null;
-        // renewal_confirmed_at 保留（業務紀錄不刪，契約 §5 T7 NULL 情境說明）
-        console.log(`[Admin T7] ${userId?.substring(0, 8)} class_name changed ${oldClass} → ${newClass}, reset renewal_intent`);
+        updates.renewal_confirmed_at = null;
+        console.log(`[Admin T7] ${userId?.substring(0, 8)} class_name changed ${oldClass} → ${newClass}, reset all renewal fields`);
       }
     } catch (err) {
       console.error('[Admin T7] SELECT old class_name error:', err.message);
-      // 查舊值失敗不阻斷，繼續 update（保守，寧可不清 intent 也不中斷操作）
+      // 查舊值失敗不阻斷，繼續 update
     }
   }
 
