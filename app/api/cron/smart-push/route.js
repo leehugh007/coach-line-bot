@@ -3,7 +3,7 @@
  *
  * 四種排程：
  * 1. ?type=weekly     — 每週三 08:00 台灣 → 課程進度推播（12 週）
- * 2. ?type=evening    — 每天 20:10 台灣 → 沉默推播（2天+）+ 第11週五續報暖場
+ * 2. ?type=evening    — 每天 20:10 台灣 → 沉默推播（2天+）+ 第10週五續報觸及 + 第11週五續報暖場
  * 3. ?type=renewal-noon — 每週四 12:15 台灣 → 第12週續報提醒
  * 4. ?type=abc-quiz   — 每週六 10:00 台灣 → ABC 小挑戰（當週任務 quiz）
  *
@@ -270,6 +270,30 @@ function getRandomQuizForSilent(courseWeek) {
 // 續報推播內容（框定回覆，不走 AI）
 // ===================================================================
 
+// 第 10 週五暖場（2026-04-20 一休定稿，打 7 成不續報學員的自我懷疑，契約 §5 T1）
+function getRenewalWeek10Message(name) {
+  return {
+    text: `${name}，兩週後就結業了，跟你聊一件事。
+
+我觀察很久一件事——有些學員快到結業時會跟我說：「我好像沒學好」「效果好像沒想像中」，然後就默默離開了。
+
+但老實說，你會這樣想，就代表你還在意。不在意的人早就鬆手了。
+
+瘦下來是徒弟，維持才是師傅。真正的分水嶺不是第一期瘦了幾公斤，是接下來一個人怎麼走回原本的生活。我們的經驗是，只參加一期就結束的學員，復胖率還是蠻高的——不是沒學到，是習慣還沒長進身體裡，被拉回去的力量太大。
+
+兩三期，是一個比較穩的錨點。
+
+如果你心裡有一點點「還想再試一段」的感覺，那就再給自己一期的時間。不是為了再瘦多少，是讓這次辛苦建立的狀態，不要白走。
+
+你現在是什麼感覺？`,
+    qr: [
+      { label: '想了解怎麼繼續', text: '想了解怎麼繼續' },
+      { label: '我覺得可以自己來', text: '我覺得可以自己來' },
+      { label: '還在想', text: '還在想' },
+    ],
+  };
+}
+
 function getRenewalWeek11Message(name) {
   return {
     text: `${name}，跟你聊一個事。\n\n大部分同學不是沒有瘦過，是瘦了之後沒維持住。休校長常說：「瘦身是徒弟，維持才是師父。」\n\n習慣真正內化需要 6-9 個月，你現在走了快 3 個月，基礎打好了，接下來是最關鍵的鞏固期。\n\n一個人撐跟有團隊陪，真的不一樣。有想過接下來怎麼做嗎？`,
@@ -465,6 +489,30 @@ async function handleEveningPush(sb, r, users, classMap, now) {
 
     // 今天已推過 → 跳過（1天冷卻）
     if (await wasPushedToday(r, userId)) continue;
+
+    // === 優先：第10週 + 星期五 → 續報第一次觸及（契約 §5 T1）===
+    if (isFriday && courseWeek === 10) {
+      const renewalKey = `${RENEWAL_LOG_PREFIX}${userId}:w10`;
+      const alreadySent = await r.get(renewalKey);
+      if (!alreadySent) {
+        const msg = getRenewalWeek10Message(name);
+        try {
+          const qrHint = msg.qr.map((q, i) => `${i + 1}. ${q.label}`).join('\n');
+          const fullMsg = `${msg.text}\n\n回覆數字就好 😊\n${qrHint}`;
+          await pushMessage(userId, fullMsg);
+          await addChatMessage(userId, 'assistant', fullMsg);
+          await r.set(renewalKey, now.toISOString(), { ex: 86400 * 30 });
+          await recordPush(r, userId);
+          pushed++;
+          log.push({ name, week: courseWeek, type: 'renewal-w10' });
+          await logPushHistory(r, name, '續報第10週', msg.text);
+          console.log(`[Renewal] ${name}: week10 warm-up`);
+        } catch (err) {
+          console.error(`[Renewal] Failed for ${name}:`, err.message);
+        }
+        continue; // 續報推了就不推沉默
+      }
+    }
 
     // === 優先：第11週 + 星期五 → 續報暖場 ===
     if (isFriday && courseWeek === 11) {
