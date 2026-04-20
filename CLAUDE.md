@@ -243,6 +243,8 @@ Redis 是快取，Supabase 是永久記憶。採用 **Read-through + Write-throu
 
 | 文件 | 位置 | 用途 |
 |------|------|------|
+| 指揮中心 | `coach-line-bot/指揮中心.md` | 架構全貌 + 資料流 + 即時狀態（**session 開工必讀**） |
+| 續報記錄契約 | `coach-line-bot/契約_續報記錄.md` | renewal_intent/confirmed_at 欄位規格 + 狀態機 + Phase 2 子步驟順序（實作必讀）|
 | 執行進度 | `ABC瘦身業務/休校長小幫手/執行進度.md` | 里程碑追蹤 |
 | 技術架構 | `ABC瘦身業務/休校長小幫手/技術架構.md` | 詳細技術文件 |
 | 課程知識總結 | `ABC文章創作/已創作文案/課程筆記/課程知識總結.md` | 知識注入來源 |

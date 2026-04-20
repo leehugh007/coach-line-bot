@@ -26,6 +26,7 @@ import {
   setPendingClassSelect, getPendingClassSelect, clearPendingClassSelect,
   getActiveClassNames, getActiveGoal, setGoal, completeGoal,
   recordStreak, getStreak, getClassStats, isFirstInteractionToday,
+  updateRenewalIntent,
 } from '@/lib/user';
 import {
   extractCoachingTags, saveCoachingTags,
@@ -514,21 +515,64 @@ async function bufferAndSchedule(replyToken, userId, text) {
   }
 
   // === 續報推播回覆：框定內容，不走 AI ===
+  // 契約_續報記錄.md §5 T2 — QR 點選 → 寫 renewal_intent + 降級豁免 cooldown push
   const renewalReply = getRenewalQRResponse(trimmed);
   if (renewalReply) {
     console.log(`[Renewal] ${userId?.substring(0, 8)}: "${trimmed}"`);
+    // 1. sendMessage（既有）
     await sendMessage(replyToken, userId, renewalReply.reply);
 
-    // 通知教練 + 助教（只推不存，不污染對話紀錄）
-    if (renewalReply.notifyCoach) {
-      let studentName = '同學';
+    // 2-6. 寫 intent + 降級判定 + cooldown push（只有有 renewal_intent 且 notifyCoach 的 5 選項進）
+    if (renewalReply.renewal_intent && renewalReply.notifyCoach) {
       try {
+        // 2. 讀 user profile（既有邏輯 + 取 oldIntent、className）
         const u = await getUser(userId);
-        studentName = u?.info?.name || u?.lineDisplayName || '同學';
-      } catch (_) {}
-      notifyRenewalInterest(studentName, renewalReply.interest).catch(err =>
-        console.error('[Renewal] Notify error:', err)
-      );
+        const studentName = u?.info?.name || u?.lineDisplayName || userId?.substring(0, 8) || '同學';
+        const oldIntent = u?.renewalIntent || null;
+        const className = u?.class_name || u?.className || null;
+        const newIntent = renewalReply.renewal_intent;
+
+        // 3. classStatus gate — 有班級才寫（非學員不寫；即使 expired/grace 也允許）
+        const classStatus = className ? await getClassStatus(className) : null;
+        if (!classStatus) {
+          console.log(`[Renewal T2] ${userId?.substring(0, 8)} no class, skip write`);
+          return;
+        }
+
+        // 4. Supabase 寫入 + Redis profile 同步
+        await updateRenewalIntent(userId, {
+          intent: newIntent,
+          at: new Date(),
+          source: 'qr_renewal',
+        });
+
+        // 5. 算降級（新值序號 < 舊值序號 = 降級，豁免 cooldown）
+        const isDowngrade = oldIntent
+          && INTENT_RANK[newIntent] !== undefined
+          && INTENT_RANK[oldIntent] !== undefined
+          && INTENT_RANK[newIntent] < INTENT_RANK[oldIntent];
+
+        // 6. Cooldown 判定 — 48hr；降級豁免
+        const { Redis: _RedisCd } = await import('@upstash/redis');
+        const _rCd = new _RedisCd({ url: process.env.KV_REST_API_URL, token: process.env.KV_REST_API_TOKEN });
+        const cdKey = `coach-renewal-notify-cd:${userId}`;
+        const cdHit = await _rCd.get(cdKey);
+
+        if (!cdHit || isDowngrade) {
+          notifyRenewalInterest(
+            studentName,
+            newIntent,
+            trimmed,
+            isDowngrade ? oldIntent : null
+          ).catch(err => console.error('[Renewal] Notify error:', err));
+          await _rCd.set(cdKey, new Date().toISOString(), { ex: 172800 });
+          console.log(`[Renewal T2] ${userId?.substring(0, 8)} intent=${newIntent} ${isDowngrade ? '(DOWNGRADE push)' : '(push)'}`);
+        } else {
+          console.log(`[Renewal T2] ${userId?.substring(0, 8)} intent=${newIntent} cooldown hit, skip push`);
+        }
+      } catch (err) {
+        console.error('[Renewal T2] error:', err);
+      }
     }
     return;
   }
@@ -1271,10 +1315,33 @@ async function processBatchedMessages(userId, messages) {
       activeGoal
     );
 
-    // === 結業期間 AI 自然帶續報 ===
+    // === 續報提示：第 1 層 confirmed_at 優先 / 第 2-5 層結業期邏輯 ===
+    // 契約_續報記錄.md §4 + §10 Phase 2.1
+    // 必須 if/else if 互斥結構，避免第 1 層「別提續報」疊加 first-time 的「自然帶續報」
     let contextSuffix = '';
-    if (classStatus === 'graduating' || classStatus === 'grace') {
-      // 檢查：學員是否已說過續報 / 已經提過續報引導
+
+    // 第 1 層：renewal_confirmed_at 命中 → 獨佔（跨所有 classStatus，跨 active/expired）
+    if (contextUser?.renewalConfirmedAt) {
+      // 若是結業期仍保留結業禁句（話術衝突必須先禁）
+      if (classStatus === 'graduating' || classStatus === 'grace') {
+        contextSuffix += `\n\n【重要情境：這位學員的課程已結束，目前是結業寬限期】
+
+⚠️ 絕對禁止的說法（很重要）：
+- 不可以說「隨時都可以問我」「我一直都在」「什麼時候想聊都可以」
+- 不可以暗示他可以像以前一樣無限使用小幫手
+- 因為結業後小幫手的服務是有限的，說了會跟實際體驗衝突`;
+      }
+      contextSuffix += `\n\n【這位學員已完成續報】
+不要再提續報的事，正常回答問題就好。可以自然地肯定他的決定（但不用每次都提），像朋友一樣聊天。`;
+      console.log(`[Renewal] ${userId?.substring(0, 8)} confirmed_at set, skip renewal prompt (layer 1)`);
+    }
+    // 第 2-5 層：既有結業期 alreadyRenewed / alreadyMentioned / first-time 邏輯
+    else if (classStatus === 'graduating' || classStatus === 'grace') {
+      // 第 2 層：renewal_intent === 'interested' 命中（契約 §4）
+      // QR 點「想了解怎麼繼續」或「問助教續報方案」後寫入 — 跨 session 持久
+      const intentInterested = contextUser?.renewalIntent === 'interested';
+
+      // 第 3 層（兜底）：學員是否已說過續報 / 已經提過續報引導
       const renewalKeywords = ['續報', '繼續報', '我有報', '已經報了', '報名了', '我報了'];
       const alreadyRenewed = chatHistory.some(m =>
         m.role === 'user' && renewalKeywords.some(kw => m.content?.includes(kw))
@@ -1292,10 +1359,14 @@ async function processBatchedMessages(userId, messages) {
 - 不可以暗示他可以像以前一樣無限使用小幫手
 - 因為結業後小幫手的服務是有限的，說了會跟實際體驗衝突`;
 
-      if (alreadyRenewed) {
-        // 學員已說續報 → 不再提，正常回覆 + 肯定
+      if (intentInterested) {
+        // 第 2 層：QR 已表達想續的意向 → 不再提（跨 session 持久，不受 chatHistory 限制）
+        contextSuffix += `\n\n這位學員已經表達想繼續的意向了。不要再提續報或推薦，正常回答問題就好。像朋友一樣聊天，可以自然地肯定他的決定。`;
+        console.log(`[Graduating] ${userId?.substring(0, 8)} renewal_intent=interested, skip renewal prompt (layer 2)`);
+      } else if (alreadyRenewed) {
+        // 第 3 層（兜底）：chatHistory 關鍵字命中 → 不再提
         contextSuffix += `\n\n這位學員已經決定續報了。不要再提續報的事，正常回答問題就好。可以自然地肯定他的決定（但不用每次都提），像朋友一樣聊天。`;
-        console.log(`[Graduating] ${userId?.substring(0, 8)} already renewed, skip renewal prompt`);
+        console.log(`[Graduating] ${userId?.substring(0, 8)} already renewed, skip renewal prompt (layer 3)`);
       } else if (alreadyMentioned) {
         // 已經提過一次續報 → 不再提
         contextSuffix += `\n\n今天已經跟這位學員提過續報了，這次不要再提。正常回答問題就好。`;
@@ -1642,40 +1713,56 @@ function getMenuTrigger(text) {
 
 // ===== 續報推播 Quick Reply 回覆（框定內容）=====
 
+// 契約_續報記錄.md §2 QR 映射表 — renewal_intent 是寫入 Supabase 的值；interest 保留向下相容
 const RENEWAL_QR_RESPONSES = {
-  // 第11週五：暖場
+  // 第10/11週五：暖場
   '想了解怎麼繼續': {
     reply: `休校長有幫續報的同學爭取優惠方案，一個月平均不到 3000 元，名額會優先保留給你。\n\n而且續報的話，小幫手會繼續陪著你，更了解你的課程進度，幫你在過程中解決問題、陪你達成目標 ☺️\n\n有興趣的話直接到「Artemis線上減重班」官方帳號問助教，他會傳方案跟報名表給你！`,
     notifyCoach: true,
     interest: 'yes',
+    renewal_intent: 'interested',
   },
   '我覺得可以自己來': {
     reply: `很棒，代表你這三個月真的有內化 💪\n\n課程結束後小幫手還是可以用的，有問題隨時來問。\n\n不過說實話，在課程中小幫手會更了解你的進度跟狀態，能更針對性地陪你。一個人維持跟有團隊陪伴，遇到卡關的時候差別真的蠻大的。\n\n如果之後改變想法，到「Artemis線上減重班」官方帳號問助教就好 ☺️`,
     notifyCoach: true,
     interest: 'maybe',
+    renewal_intent: 'not_interested',
   },
   '還在想': {
     reply: `不急 ☺️ 你可以先想一件事：課程結束後，如果某天體重突然上升、或是連續幾天外食不知道怎麼選，你會怎麼做？\n\n有團隊的時候，這些都是小事。一個人的時候，就容易變成放棄的理由。\n\n想好了隨時到「Artemis線上減重班」官方帳號問助教，名額有幫你保留 ☺️`,
     notifyCoach: true,
     interest: 'thinking',
+    renewal_intent: 'thinking',
   },
   // 第12週四：最後提醒
   '問助教續報方案': {
     reply: `到「Artemis線上減重班」官方帳號，跟助教說「我想了解續報方案」就好，他會傳方案跟報名表給你 ☺️\n\n續報一個月平均不到 3000 元，小幫手也會繼續陪著你！`,
     notifyCoach: true,
     interest: 'yes',
+    renewal_intent: 'interested',
   },
   '續報我再想想': {
     reply: `好的 ☺️ 名額有保留著，想到的時候到「Artemis線上減重班」官方帳號問助教就好。`,
     notifyCoach: true,
     interest: 'thinking',
+    renewal_intent: 'thinking',
   },
   '我有其他問題想問': {
     reply: `當然！你想問什麼都可以 ☺️`,
     notifyCoach: false,
     interest: null,
+    renewal_intent: null,
   },
 };
+
+// 契約_續報記錄.md §4 唯一映射，消費端共用這張表
+const INTENT_TO_LABEL = {
+  interested: '想繼續 ✅',
+  thinking: '還在想 💭',
+  not_interested: '自己試試看 💡（可再聊聊）',
+};
+
+const INTENT_RANK = { interested: 2, thinking: 1, not_interested: 0 };
 
 function getRenewalQRResponse(text) {
   return RENEWAL_QR_RESPONSES[text] || null;
@@ -1683,16 +1770,29 @@ function getRenewalQRResponse(text) {
 
 /**
  * 通知教練 + 助教（LINE push，不存對話紀錄）
+ *
+ * 契約_續報記錄.md §4 notifyRenewalInterest 新簽名
+ *
+ * @param {string} studentName — 學員名稱；NULL 時由呼叫端 fallback 為 userId 前 8 字
+ * @param {string} intent — renewal_intent 新值：interested / thinking / not_interested
+ * @param {string} evidence — QR 固定文字或關鍵字原話
+ * @param {string|null} oldIntent — 若為降級情境傳入舊值，用於組「⚠️ 意向變化」label
  */
-async function notifyRenewalInterest(studentName, interest) {
-  const interestMap = {
-    yes: '想繼續 ✅',
-    maybe: '在考慮 🤔',
-    thinking: '還在想 💭',
-    no: '不需要了',
-  };
+async function notifyRenewalInterest(studentName, intent, evidence = '', oldIntent = null) {
+  // 降級 = 新值序號 < 舊值序號
+  const isDowngrade = oldIntent
+    && INTENT_RANK[intent] !== undefined
+    && INTENT_RANK[oldIntent] !== undefined
+    && INTENT_RANK[intent] < INTENT_RANK[oldIntent];
 
-  const text = `📋 續報意願\n${studentName}：${interestMap[interest] || interest}\n\n→ 查看學員：https://coach-line-bot.vercel.app/admin/students`;
+  const newLabel = INTENT_TO_LABEL[intent] || intent;
+  const interestLabel = isDowngrade
+    ? `⚠️ 意向變化：${INTENT_TO_LABEL[oldIntent]} → ${newLabel}`
+    : newLabel;
+
+  const prefix = isDowngrade ? '【意向變化提醒】' : '';
+  const evidenceLine = evidence ? `\n原話：${evidence}` : '';
+  const text = `${prefix}📋 續報意願\n${studentName}：${interestLabel}${evidenceLine}\n\n→ 查看學員：https://coach-line-bot.vercel.app/admin/students`;
 
   const targets = [process.env.COACH_USER_ID, process.env.STAFF_USER_ID].filter(Boolean);
   for (const id of targets) {
