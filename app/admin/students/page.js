@@ -118,13 +118,54 @@ export default function StudentsPage() {
         body: JSON.stringify({ userId, className }),
       });
       if (res.ok) {
-        setStudents(prev => prev.map(s => s.id === userId ? { ...s, class_name: className } : s));
+        // class_name 改變 → T7 同步清 renewal_intent（API 會自動清）
+        // UI 也要反映：class_name 改了的話 renewal_intent 清掉
+        setStudents(prev => prev.map(s => {
+          if (s.id !== userId) return s;
+          const classChanged = (s.class_name || null) !== (className || null);
+          if (classChanged) {
+            return { ...s, class_name: className, renewal_intent: null, renewal_intent_at: null, renewal_intent_source: null };
+          }
+          return { ...s, class_name: className };
+        }));
       }
     } catch (err) {
       console.error('Update class error:', err);
     }
     setEditingClass(null);
     setClassInput('');
+  }
+
+  // 確認/取消續報（寫 renewal_confirmed_at）
+  // 契約_續報記錄.md §5 T4/T5
+  async function updateRenewal(userId, confirmRenewal) {
+    try {
+      const res = await fetch('/api/admin/students', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-admin-key': adminKey },
+        body: JSON.stringify({ userId, confirmRenewal }),
+      });
+      if (res.ok) {
+        const now = confirmRenewal ? new Date().toISOString() : null;
+        setStudents(prev => prev.map(s => s.id === userId ? { ...s, renewal_confirmed_at: now } : s));
+        if (selectedId === userId) {
+          setSelectedInfo(prev => prev ? { ...prev, renewal_confirmed_at: now } : prev);
+        }
+      }
+    } catch (err) {
+      console.error('Update renewal error:', err);
+    }
+  }
+
+  // renewal_intent 標籤樣式
+  function renewalBadge(intent) {
+    if (!intent) return null;
+    const map = {
+      interested: { label: '想續 ✅', bg: '#E8F5E9', color: '#2E7D32' },
+      thinking: { label: '還在想 💭', bg: '#FFF8E1', color: '#F57F17' },
+      not_interested: { label: '自己來 💡', bg: '#ECEFF1', color: '#546E7A' },
+    };
+    return map[intent] || null;
   }
 
   async function batchAssignClass() {
@@ -435,6 +476,25 @@ export default function StudentsPage() {
                         {s.class_name}
                       </span>
                     )}
+                    {/* 續報狀態：confirmed_at 優先於 intent */}
+                    {s.renewal_confirmed_at ? (
+                      <span
+                        title={`已確認續報：${new Date(s.renewal_confirmed_at).toLocaleDateString('zh-TW')}`}
+                        style={{ fontSize: 11, padding: '1px 8px', borderRadius: 10, background: '#E0F7FA', color: '#00695C', fontWeight: 700 }}
+                      >
+                        ✓ 已續報
+                      </span>
+                    ) : (() => {
+                      const b = renewalBadge(s.renewal_intent);
+                      return b ? (
+                        <span
+                          title={`續報意向${s.renewal_intent_at ? `：${new Date(s.renewal_intent_at).toLocaleDateString('zh-TW')}` : ''}`}
+                          style={{ fontSize: 11, padding: '1px 8px', borderRadius: 10, background: b.bg, color: b.color, fontWeight: 600 }}
+                        >
+                          {b.label}
+                        </span>
+                      ) : null;
+                    })()}
                   </div>
                   {s.goal && <div style={{ fontSize: 12, color: '#888', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.goal}</div>}
                 </div>
@@ -476,6 +536,32 @@ export default function StudentsPage() {
                           title="標記為工作人員">
                           👤
                         </button>
+                      )}
+                      {/* 續報確認 toggle（契約 §5 T4/T5） */}
+                      {(!s.role || s.role === 'student') && (
+                        s.renewal_confirmed_at ? (
+                          <button
+                            onClick={() => {
+                              if (confirm(`取消 ${s.display_name || '這位學員'} 的已續報標記？`)) {
+                                updateRenewal(s.id, false);
+                              }
+                            }}
+                            style={{ padding: '4px 8px', border: '1px solid #00695C', borderRadius: 6, fontSize: 11, cursor: 'pointer', background: '#E0F7FA', color: '#00695C', fontWeight: 600 }}
+                            title="點此取消已續報">
+                            ✓續
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => {
+                              if (confirm(`確認 ${s.display_name || '這位學員'} 已完成續報？\n\n確認後：\n- 小幫手永遠不再提續報\n- 可隨時取消`)) {
+                                updateRenewal(s.id, true);
+                              }
+                            }}
+                            style={{ padding: '4px 8px', border: '1px solid #ddd', borderRadius: 6, fontSize: 11, cursor: 'pointer', background: 'white', color: '#00695C' }}
+                            title="標記已完成續報">
+                            確認續報
+                          </button>
+                        )
                       )}
                     </div>
                   )}
