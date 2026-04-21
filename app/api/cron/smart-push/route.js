@@ -221,26 +221,74 @@ function getChurnPreventionMessage(daysSilent, name, courseWeek) {
 
   // 21+ 天：重啟框架（不提過去，只說今天可以開始）
   if (daysSilent >= 21) {
-    return `${name}，不管之前怎樣，今天就可以是重新開始的一天。\n\n跟我說說，現在身體狀況怎樣？\n\n1. 說真的，最近吃得有點亂\n2. 體重有點回升，想重新來過\n3. 其實還好，只是沒什麼動靜\n4. 我想繼續，不知道從哪裡開始`;
+    return {
+      text: `${name}，不管之前怎樣，今天就可以是重新開始的一天。\n\n現在身體狀況怎樣，選一個最像你的 😊`,
+      qr: [
+        { label: '最近吃得有點亂',     text: '最近吃得有點亂' },
+        { label: '體重回升想重新來過',  text: '體重有點回升，想重新來過' },
+        { label: '其實還好',           text: '其實還好，只是沒什麼動靜' },
+        { label: '想繼續不知從哪開始',  text: '我想繼續，不知道從哪裡開始' },
+      ],
+    };
   }
 
   // 14-20 天：直接一點，但不施壓
   if (daysSilent >= 14) {
     if (stage === 'late') {
-      return `${name}，課程快到後段了，最近還好嗎？\n\n不用說很多，選一個最像你的 😊\n\n1. 說實話，有點懈怠了\n2. 沒什麼進展，有點沮喪\n3. 其實還好，只是比較少來\n4. 最近生活有點亂，顧不到這個`;
+      return {
+        text: `${name}，課程快到後段了，最近還好嗎？選一個最像你的 😊`,
+        qr: [
+          { label: '說實話有點懈怠', text: '說實話，有點懈怠了' },
+          { label: '沒進展有點沮喪',  text: '沒什麼進展，有點沮喪' },
+          { label: '其實還好',        text: '其實還好，只是比較少來' },
+          { label: '生活亂顧不到',    text: '最近生活有點亂，顧不到這個' },
+        ],
+      };
     }
-    return `${name}，有一段時間沒聊了。\n\n沒有要催你，只是想知道你最近還好嗎？選一個最像你的 😊\n\n1. 說實話，最近吃得有點亂\n2. 感覺沒什麼進展，提不起勁\n3. 最近太忙了，這塊先放著\n4. 其實還好，只是沒想到要傳`;
+    return {
+      text: `${name}，有一段時間沒聊了。\n\n沒有要催你，只是想知道你最近還好嗎？選一個最像你的 😊`,
+      qr: [
+        { label: '最近吃得有點亂', text: '說實話，最近吃得有點亂' },
+        { label: '感覺沒啥進展',   text: '感覺沒什麼進展，提不起勁' },
+        { label: '最近太忙了',     text: '最近太忙了，這塊先放著' },
+        { label: '其實還好',       text: '其實還好，只是沒想到要傳' },
+      ],
+    };
   }
 
   // 7-13 天：輕巧，不施壓，讓她說出遇到的困難
   if (stage === 'early') {
-    return `${name}，這幾天有沒有遇到什麼卡住的地方？選一個最像你的 😊\n\n1. 外食太多，不確定自己有沒有搭對\n2. 體重沒在動，有點心灰意冷\n3. 其實還好，只是沒想到要來聊\n4. 最近太忙了，真的顧不到`;
+    return {
+      text: `${name}，這幾天有沒有遇到什麼卡住的地方？選一個最像你的 😊`,
+      qr: [
+        { label: '外食多搭不太對',   text: '外食太多，不確定自己有沒有搭對' },
+        { label: '體重沒動心灰意冷', text: '體重沒在動，有點心灰意冷' },
+        { label: '其實還好',         text: '其實還好，只是沒想到要來聊' },
+        { label: '最近太忙顧不到',   text: '最近太忙了，真的顧不到' },
+      ],
+    };
   }
   if (stage === 'mid') {
-    return `${name}，偷問你一件事，選一個最像你現在的狀況 😊\n\n1. 覺得吃得還行，但體重沒太大變化\n2. 聚餐外食變多，有點抓不住\n3. 習慣有點建立了，但最近在偷懶\n4. 說真的，最近有一段時間亂吃`;
+    return {
+      text: `${name}，偷問你一件事，選一個最像你現在的狀況 😊`,
+      qr: [
+        { label: '吃還行體重沒動',   text: '覺得吃得還行，但體重沒太大變化' },
+        { label: '聚餐外食變多',     text: '聚餐外食變多，有點抓不住' },
+        { label: '習慣建了在偷懶',   text: '習慣有點建立了，但最近在偷懶' },
+        { label: '最近有段時間亂吃', text: '說真的，最近有一段時間亂吃' },
+      ],
+    };
   }
   // late
-  return `${name}，課程到後段了，選一個最像你現在感覺的 😊\n\n1. 覺得快結業了，反而有點懈怠\n2. 效果沒有想像中明顯，有點失去動力\n3. 其實還有在做，只是沒有傳訊息的習慣\n4. 最近生活有點亂，這塊先放著了`;
+  return {
+    text: `${name}，課程到後段了，選一個最像你現在感覺的 😊`,
+    qr: [
+      { label: '快結業了有點懈怠', text: '覺得快結業了，反而有點懈怠' },
+      { label: '效果不如想像',     text: '效果沒有想像中明顯，有點失去動力' },
+      { label: '還在做只是沒傳',   text: '其實還有在做，只是沒有傳訊息的習慣' },
+      { label: '生活亂先放著',     text: '最近生活有點亂，這塊先放著了' },
+    ],
+  };
 }
 
 // ===================================================================
@@ -698,16 +746,21 @@ async function handleEveningPush(sb, r, users, classMap, now) {
     if (daysSilent < 7 && user.class_name) {
       try { silentClassStats = await getClassStats(user.class_name); } catch (_) {}
     }
-    const message = getSilentMessage(daysSilent, name, activeGoal?.goal_text, courseWeek, silentClassStats);
+    const silentResult = getSilentMessage(daysSilent, name, activeGoal?.goal_text, courseWeek, silentClassStats);
+    const silentText = typeof silentResult === 'object' ? silentResult.text : silentResult;
 
     try {
-      await pushMessage(userId, message);
+      if (typeof silentResult === 'object' && silentResult.text && silentResult.qr) {
+        await pushWithQuickReply(userId, silentResult.text, silentResult.qr);
+      } else {
+        await pushMessage(userId, silentResult);
+      }
       // 存入對話紀錄讓 AI 知道推了什麼（學員回覆時 AI 才接得住）
-      await addChatMessage(userId, 'assistant', message);
+      await addChatMessage(userId, 'assistant', silentText);
       await recordPush(r, userId);
       pushed++;
       log.push({ name, week: courseWeek, type: daysSilent >= 7 ? 'silent-7d' : 'silent-2d', daysSilent });
-      await logPushHistory(r, name, `沉默${daysSilent}天`, message);
+      await logPushHistory(r, name, `沉默${daysSilent}天`, silentText);
       console.log(`[Silent] ${name}: silent=${daysSilent}d (week${courseWeek})`);
     } catch (err) {
       console.error(`[Silent] Failed for ${name}:`, err.message);
