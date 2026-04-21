@@ -19,10 +19,14 @@ import { Redis } from '@upstash/redis';
 export const maxDuration = 300;
 
 const ADMIN_KEY = process.env.ADMIN_API_KEY;
+const STAFF_KEY = process.env.STAFF_API_KEY;
 
+// 跟 /api/admin/import 一致：同時接受 admin / staff key
 function checkAuth(request) {
-  const key = request.headers.get('x-admin-key');
-  return ADMIN_KEY && key === ADMIN_KEY;
+  const key = request.headers.get('x-admin-key') || request.headers.get('x-staff-key');
+  if (ADMIN_KEY && key === ADMIN_KEY) return true;
+  if (STAFF_KEY && key === STAFF_KEY) return true;
+  return false;
 }
 
 function getRedisClient() {
