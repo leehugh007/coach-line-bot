@@ -18,7 +18,7 @@ import { NextResponse } from 'next/server';
 import { pushMessage, pushWithQuickReply } from '@/lib/line';
 import { addChatMessage } from '@/lib/chat';
 import { getSupabase } from '@/lib/supabase';
-import { getActiveGoal } from '@/lib/user';
+import { getActiveGoal, getClassStats } from '@/lib/user';
 import { Redis } from '@upstash/redis';
 
 const CLASS_PREFIX = 'coach-class:';
@@ -215,7 +215,7 @@ function getWeeklyMessage(week, name) {
 // 沉默推播內容
 // ===================================================================
 
-function getSilentMessage(daysSilent, name, goalText = null, courseWeek = 1) {
+function getSilentMessage(daysSilent, name, goalText = null, courseWeek = 1, classStats = null) {
   // 沉默 7+ 天 → 推知識小題目（降低互動門檻，不再問「你還好嗎」）
   if (daysSilent >= 7) {
     const quiz = getRandomQuizForSilent(courseWeek);
@@ -230,6 +230,11 @@ function getSilentMessage(daysSilent, name, goalText = null, courseWeek = 1) {
       `${name}，一休說：「環境會影響行為。」家裡沒零食就不會吃。你家冰箱現在有什麼？跟我說我幫你想搭配 😊`,
     ];
     return fallbacks[Math.floor(Math.random() * fallbacks.length)];
+  }
+
+  // 沉默 2-6 天 + 有班級數據：帶群體存在感 + 低門檻選項
+  if (classStats && classStats.todayUniqueUsers > 0) {
+    return `${name}，今天你們班已經有 ${classStats.todayUniqueUsers} 個人跟我聊過了 😊\n\n回覆數字就好：\n1. 今天有照菜肉飯順序吃\n2. 今天有吃到兩拳頭蔬菜\n3. 今天有走超過 5000 步`;
   }
 
   // 沉默 2-6 天 + 有目標：帶目標追蹤（多句隨機）
@@ -445,7 +450,19 @@ async function handleWeeklyPush(sb, r, users, classMap, now) {
     try {
       // LINE Push API 不支援 Quick Reply，用數字選項
       const qrHint = msg.qr.map((q, i) => `${i + 1}. ${q.label}`).join('\n');
-      const fullMsg = `${msg.text}\n\n回覆數字就好 😊\n${qrHint}`;
+      let fullMsg = `${msg.text}\n\n回覆數字就好 😊\n${qrHint}`;
+
+      // === 場景 3：帶班級共同目標 ===
+      if (user.class_name) {
+        try {
+          const weekStats = await getClassStats(user.class_name, userId);
+          if (weekStats) {
+            const goalLine = `\n\n${user.class_name} 第 ${courseWeek} 週 ✊ 這週目標：全班累積 ${weekStats.weekGoal} 次互動。目前 ${weekStats.weekInteractions} 次${weekStats.weekUserContribution > 0 ? `，你貢獻了 ${weekStats.weekUserContribution} 次 💪` : ''}`;
+            fullMsg += goalLine;
+          }
+        } catch (_) {}
+      }
+
       await pushMessage(userId, fullMsg);
       // 存入對話紀錄讓 AI 知道上下文（學員回「1」時 AI 能接住）
       await addChatMessage(userId, 'assistant', fullMsg);
@@ -473,6 +490,24 @@ async function handleEveningPush(sb, r, users, classMap, now) {
   let pushed = 0;
   const log = [];
   const isFriday = getTaiwanDayOfWeek() === 5;
+
+  // === 場景 5：班級達標檢查（per class，只查一次）===
+  const classGoalReached = {}; // className → { reached, stats }
+  const classGoalChecked = {}; // className → true（本週已推過慶祝）
+  for (const className of Object.keys(classMap)) {
+    try {
+      const goalKey = `coach-class-goal-celebrated:${className}`;
+      const alreadyCelebrated = await r.get(goalKey);
+      if (alreadyCelebrated) {
+        classGoalChecked[className] = true;
+        continue;
+      }
+      const stats = await getClassStats(className);
+      if (stats && stats.weekInteractions >= stats.weekGoal) {
+        classGoalReached[className] = stats;
+      }
+    } catch (_) {}
+  }
 
   for (const user of users) {
     const userId = user.id;
@@ -512,6 +547,30 @@ async function handleEveningPush(sb, r, users, classMap, now) {
         }
         continue; // 續報推了就不推沉默
       }
+    }
+
+    // === 場景 5：班級達標 → 慶祝推播 ===
+    const goalStats = classGoalReached[user.class_name];
+    if (goalStats && !classGoalChecked[user.class_name]) {
+      try {
+        const userContrib = (goalStats.weekInteractions > 0)
+          ? Math.round(((await getClassStats(user.class_name, userId))?.weekUserContribution || 0))
+          : 0;
+        const pctRank = userContrib > 0
+          ? (userContrib >= goalStats.weekInteractions / goalStats.studentCount * 1.5 ? '前 30% 的活躍同學' : '班上的一份力量')
+          : '';
+        const celebMsg = `🎉 ${user.class_name} 本週互動達標了！${userContrib > 0 ? `你這週貢獻了 ${userContrib} 次，是${pctRank} 😊` : '繼續保持 💪'}`;
+        await pushMessage(userId, celebMsg);
+        await addChatMessage(userId, 'assistant', celebMsg);
+        await recordPush(r, userId);
+        pushed++;
+        log.push({ name, week: courseWeek, type: 'class-goal-reached' });
+        await logPushHistory(r, name, '班級達標慶祝', celebMsg);
+        console.log(`[ClassGoal] ${name}: class goal reached!`);
+      } catch (err) {
+        console.error(`[ClassGoal] Failed for ${name}:`, err.message);
+      }
+      continue; // 達標推了就不推其他
     }
 
     // === 優先：第11週 + 星期五 → 續報暖場 ===
@@ -612,9 +671,13 @@ async function handleEveningPush(sb, r, users, classMap, now) {
       continue; // 推了回顧就不推沉默
     }
 
-    // === 一般沉默推播（帶目標 + 知識題） ===
+    // === 一般沉默推播（帶目標 + 班級數據 + 知識題） ===
     const activeGoal = await getActiveGoal(userId);
-    const message = getSilentMessage(daysSilent, name, activeGoal?.goal_text, courseWeek);
+    let silentClassStats = null;
+    if (daysSilent < 7 && user.class_name) {
+      try { silentClassStats = await getClassStats(user.class_name); } catch (_) {}
+    }
+    const message = getSilentMessage(daysSilent, name, activeGoal?.goal_text, courseWeek, silentClassStats);
 
     try {
       await pushMessage(userId, message);
@@ -627,6 +690,16 @@ async function handleEveningPush(sb, r, users, classMap, now) {
       console.log(`[Silent] ${name}: silent=${daysSilent}d (week${courseWeek})`);
     } catch (err) {
       console.error(`[Silent] Failed for ${name}:`, err.message);
+    }
+  }
+
+  // === 場景 5：標記已達標的班級（本週不再推慶祝）===
+  for (const className of Object.keys(classGoalReached)) {
+    if (!classGoalChecked[className]) {
+      try {
+        // 設 7 天 TTL（下週一會自動重置）
+        await r.set(`coach-class-goal-celebrated:${className}`, '1', { ex: 86400 * 7 });
+      } catch (_) {}
     }
   }
 
