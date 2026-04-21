@@ -15,6 +15,9 @@ import { getSupabase } from '@/lib/supabase';
 import { NextResponse } from 'next/server';
 import { Redis } from '@upstash/redis';
 
+// 140 users + ~500 preloads 序列 await 約 90 秒，Vercel 預設 timeout 不夠
+export const maxDuration = 300;
+
 const ADMIN_KEY = process.env.ADMIN_API_KEY;
 
 function checkAuth(request) {
