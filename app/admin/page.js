@@ -80,6 +80,14 @@ export default function AdminPage() {
     }
   }
 
+  // 統一 401 處理：清 localStorage + 踢回登入
+  const handleSessionExpired = useCallback(() => {
+    localStorage.removeItem('coach-admin-key');
+    setAdminKey('');
+    setUnlocked(false);
+    setPwError('密鑰已失效，請重新登入');
+  }, []);
+
   // === 群組問題監控功能 ===
 
   const loadPending = useCallback(async () => {
@@ -90,6 +98,7 @@ export default function AdminPage() {
       const res = await fetch('/api/admin/pending', {
         headers: { 'x-admin-key': adminKey },
       });
+      if (res.status === 401) { handleSessionExpired(); return; }
       const data = await res.json();
       if (res.ok && data.ok) {
         setPendingItems(data.items || []);
@@ -100,7 +109,7 @@ export default function AdminPage() {
       setPendingError('連線失敗：' + err.message);
     }
     setPendingLoading(false);
-  }, [adminKey]);
+  }, [adminKey, handleSessionExpired]);
 
   // 解鎖後自動載入待回應
   useEffect(() => {
@@ -164,6 +173,7 @@ export default function AdminPage() {
     setOutreachLoading(true);
     try {
       const res = await fetch('/api/admin/history', { headers: { 'x-admin-key': adminKey } });
+      if (res.status === 401) { handleSessionExpired(); return; }
       const data = await res.json();
       if (res.ok && data.ok) {
         setOutreachUsers(data.users || []);
@@ -230,6 +240,7 @@ export default function AdminPage() {
     setHistoryLoading(true);
     try {
       const res = await fetch('/api/admin/history', { headers: { 'x-admin-key': adminKey } });
+      if (res.status === 401) { handleSessionExpired(); return; }
       const data = await res.json();
       if (res.ok && data.ok) setHistoryUsers(data.users || []);
     } catch (err) {
@@ -247,6 +258,7 @@ export default function AdminPage() {
     setShowAllMessages(false);
     try {
       const res = await fetch(`/api/admin/history?user=${userId}`, { headers: { 'x-admin-key': adminKey } });
+      if (res.status === 401) { handleSessionExpired(); return; }
       const data = await res.json();
       if (res.ok && data.ok) {
         setUserConversations(data.conversations || []);
