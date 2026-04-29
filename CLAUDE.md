@@ -244,6 +244,7 @@ Redis 是快取，Supabase 是永久記憶。採用 **Read-through + Write-throu
 | 文件 | 位置 | 用途 |
 |------|------|------|
 | 指揮中心 | `coach-line-bot/指揮中心.md` | 架構全貌 + 資料流 + 即時狀態（**session 開工必讀**） |
+| 系統規則契約 | `coach-line-bot/契約_系統規則.md` | **5 子契約整合**：Bot 人格 / Prompt 規則 12×4 矩陣 / 資料持久化 A/B/C 分類 / Redis 命名 / Cron 觸發。動 prompt / 加 Redis key / 改 cron 前必讀對應章節 |
 | 續報記錄契約 | `coach-line-bot/契約_續報記錄.md` | renewal_intent/confirmed_at 欄位規格 + 狀態機 + Phase 2 子步驟順序（實作必讀）|
 | 執行進度 | `ABC瘦身業務/休校長小幫手/執行進度.md` | 里程碑追蹤 |
 | 技術架構 | `ABC瘦身業務/休校長小幫手/技術架構.md` | 詳細技術文件 |
