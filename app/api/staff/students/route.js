@@ -5,23 +5,14 @@
  */
 
 import { NextResponse } from 'next/server';
-import { Redis } from '@upstash/redis';
 import { getSupabase } from '@/lib/supabase';
 import { getPreloadedStatus } from '@/lib/user';
-
-function getRedis() {
-  return new Redis({
-    url: process.env.KV_REST_API_URL,
-    token: process.env.KV_REST_API_TOKEN,
-  });
-}
+import { getClass, getActiveClassNames } from '@/lib/classes';
 
 function checkAuth(request) {
   const key = request.headers.get('x-staff-key') || request.headers.get('x-admin-key');
   return key === process.env.STAFF_API_KEY || key === process.env.ADMIN_API_KEY;
 }
-
-const CLASS_PREFIX = 'coach-class:';
 
 export async function GET(request) {
   if (!checkAuth(request)) {
@@ -35,21 +26,8 @@ export async function GET(request) {
   if (!sb) return NextResponse.json({ error: 'Supabase not configured' }, { status: 500 });
 
   // 1. 取得進行中的班級名稱（用於默認篩選）
-  const r = getRedis();
-  const activeClassNames = [];
-  const classNamesAll = [];
-  const allClassKeys = await r.smembers('coach-classes-index');
-  for (const cn of (allClassKeys || [])) {
-    const cd = await r.get(`${CLASS_PREFIX}${cn}`);
-    if (cd) {
-      const parsed = typeof cd === 'string' ? JSON.parse(cd) : cd;
-      classNamesAll.push(cn);
-      const start = new Date(parsed.startDate);
-      const end = parsed.endDate ? new Date(parsed.endDate) : null;
-      const now2 = new Date();
-      if (now2 >= start && (!end || now2 <= end)) activeClassNames.push(cn);
-    }
-  }
+  // 對齊契約 §3：走 lib/classes.js read-through（Redis miss → Supabase 回補）
+  const activeClassNames = await getActiveClassNames();
 
   let query = sb.from('users').select('id, display_name, class_name, updated_at, join_date');
   if (classFilter) {
@@ -69,13 +47,12 @@ export async function GET(request) {
   }
 
   // 2. 取得班級的開學日期
+  // 對齊契約 §3：走 lib/classes.js getClass（Read-through）
   const classNames = [...new Set((users || []).map(u => u.class_name).filter(Boolean))];
   const classMap = {};
   for (const cn of classNames) {
-    const classData = await r.get(`${CLASS_PREFIX}${cn}`);
-    if (classData) {
-      classMap[cn] = typeof classData === 'string' ? JSON.parse(classData) : classData;
-    }
+    const classData = await getClass(cn);
+    if (classData) classMap[cn] = classData;
   }
 
   // 3. 取得每位用戶的最後互動時間和互動次數

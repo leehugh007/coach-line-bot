@@ -19,9 +19,9 @@ import { pushMessage, pushWithQuickReply } from '@/lib/line';
 import { addChatMessage } from '@/lib/chat';
 import { getSupabase } from '@/lib/supabase';
 import { getActiveGoal, getClassStats } from '@/lib/user';
+import { getClass } from '@/lib/classes';
 import { Redis } from '@upstash/redis';
 
-const CLASS_PREFIX = 'coach-class:';
 const PUSH_LOG_PREFIX = 'coach-push-log:';      // 通用推播紀錄（1天冷卻）
 const WEEK_LOG_PREFIX = 'coach-week-push:';      // 課程週數推播紀錄
 const RENEWAL_LOG_PREFIX = 'coach-renewal-push:'; // 續報推播紀錄
@@ -68,9 +68,10 @@ async function loadStudentsAndClasses(sb, r) {
 
   const classNames = [...new Set(users.map(u => u.class_name).filter(Boolean))];
   const classMap = {};
+  // 對齊契約 §3：走 lib/classes.js getClass（Read-through）
   for (const cn of classNames) {
-    const data = await r.get(`${CLASS_PREFIX}${cn}`);
-    if (data) classMap[cn] = typeof data === 'string' ? JSON.parse(data) : data;
+    const data = await getClass(cn);
+    if (data) classMap[cn] = data;
   }
 
   return { users, classMap };
