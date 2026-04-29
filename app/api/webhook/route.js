@@ -924,7 +924,25 @@ async function bufferAndSchedule(replyToken, userId, text) {
     const excludeFood = quizTriggerMatch ? quizTriggerMatch[1] : null;
     const r = (await import('@upstash/redis')).Redis;
     const redis = new r({ url: process.env.KV_REST_API_URL, token: process.env.KV_REST_API_TOKEN });
-    const answered = await redis.smembers(QUIZ_KEY(userId)) || [];
+    let answered = await redis.smembers(QUIZ_KEY(userId)) || [];
+    // 對齊契約 §3.5：Redis SET miss 時從 Supabase coach_quiz_collected 回補
+    // 防 Redis 異常清檔導致學員看到已答過的食物被當「新題」重複出
+    if (answered.length === 0) {
+      try {
+        const { getSupabase } = await import('@/lib/supabase');
+        const sb = getSupabase();
+        if (sb) {
+          const { data } = await sb.from('coach_quiz_collected')
+            .select('food').eq('user_id', userId);
+          const foods = (data || []).map(row => row.food).filter(Boolean);
+          if (foods.length > 0) {
+            await redis.sadd(QUIZ_KEY(userId), ...foods);
+            answered = foods;
+            console.log(`[FoodQuiz] Read-through restored ${foods.length} foods for ${userId.slice(0, 8)}`);
+          }
+        }
+      } catch (e) { console.error('[FoodQuiz] Read-through error:', e); }
+    }
     const collected = answered.length;
     const level = getQuizLevel(collected);
 
