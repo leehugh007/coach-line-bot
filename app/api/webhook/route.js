@@ -115,7 +115,20 @@ async function processEvent(event) {
       return await bufferAndSchedule(replyToken, userId, message.text);
     }
 
-    // 其他類型
+    // 圖片：set Redis flag，60 秒內若有文字訊息進來，AI 會收到「用戶剛傳圖片」marker
+    // 避免 AI 拿到 chat history 裡的「這是圖片」字串就腦補假裝看到（Shair 事件 2026-04-28）
+    if (message.type === 'image') {
+      try {
+        const { Redis } = await import('@upstash/redis');
+        const _rImg = new Redis({ url: process.env.KV_REST_API_URL, token: process.env.KV_REST_API_TOKEN });
+        await _rImg.set(`coach-image-pending:${userId}`, '1', { ex: 60 });
+        console.log(`[ImageMarker] ${userId?.substring(0, 8)}: image flag set (60s)`);
+      } catch (e) {
+        console.error('[ImageMarker] set error:', e.message);
+      }
+    }
+
+    // 其他類型（圖片/貼圖/影片/檔案等都走這裡）
     return await sendMessage(replyToken, userId,
       '嗨！我是休校長小幫手，目前主要用文字跟你聊天。有什麼心態上的問題或飲食上的困擾，都可以直接打字跟我說！'
     );
@@ -1338,8 +1351,28 @@ async function processBatchedMessages(userId, messages) {
     await _rGrad.set(gradDailyKey, '1', { ex: ttl });
   }
 
+  // === 圖片 marker：私訊收到 image 60 秒內若有文字進來，前綴 marker 給 AI ===
+  // 避免 AI 拿到「這是圖片」這類 hint 字就腦補看到照片內容（Shair 事件 2026-04-28）
+  let imageMarkerPrefix = '';
+  try {
+    const { Redis } = await import('@upstash/redis');
+    const _rImgChk = new Redis({ url: process.env.KV_REST_API_URL, token: process.env.KV_REST_API_TOKEN });
+    const imgFlag = await _rImgChk.get(`coach-image-pending:${userId}`);
+    if (imgFlag) {
+      imageMarkerPrefix = '[系統提示：學員剛剛傳了一張圖片給你，但你沒有讀圖能力，看不到圖片內容。請在回覆開頭坦誠告訴學員「我看不到你傳的照片」，並引導他用文字描述吃了什麼。絕對不要假裝看到、不要描述份量顏色菜色組成、不要套用知識庫範本去腦補細節。]\n\n學員的訊息：';
+      await _rImgChk.del(`coach-image-pending:${userId}`);
+      console.log(`[ImageMarker] ${userId?.substring(0, 8)}: marker injected, flag cleared`);
+    }
+  } catch (e) {
+    console.error('[ImageMarker] check error:', e.message);
+  }
+
   // === Code enforcement：照片能力限制（code gate + AI 判定，不誤殺）===
-  const PHOTO_KEYWORDS = ['看照片', '傳照片', '拍照', '傳圖', '看圖', '看照', '傳張', '拍給你', '照片給你', '成分表照', '看成分表'];
+  // 涵蓋兩類句式：(1) 問能力的（你能不能看照片）(2) 假設你看得到的（這是圖片/這張照片）
+  const PHOTO_KEYWORDS = [
+    '看照片', '傳照片', '拍照', '傳圖', '看圖', '看照', '傳張', '拍給你', '照片給你', '成分表照', '看成分表',
+    '這是圖片', '這是圖', '這張照片', '這張圖', '看一下這', '幫我看這', '剛剛傳的'
+  ];
   const hasPhotoKeyword = PHOTO_KEYWORDS.some(kw => combinedText.includes(kw));
   if (hasPhotoKeyword) {
     // AI 輕量判定：學員是在問小幫手能不能看照片，還是只是提到拍照
@@ -1603,7 +1636,8 @@ async function processBatchedMessages(userId, messages) {
     }
 
     // === AI 回覆（用合併後的完整文字，傳入預計算的意圖）===
-    const reply = await handleMessage(combinedText, chatHistory, userContext + contextSuffix, milestone, intent, userId);
+    // imageMarkerPrefix：若 60 秒內收過 image，前綴 marker 讓 AI 知道用戶傳了圖（避免幻覺看到照片）
+    const reply = await handleMessage(imageMarkerPrefix + combinedText, chatHistory, userContext + contextSuffix, milestone, intent, userId);
 
     // === 場景 1：群體存在感 — 暫時停用（2026-04-17 發現問題）===
     // 停用原因：
