@@ -26,7 +26,7 @@ import {
   setPendingClassSelect, getPendingClassSelect, clearPendingClassSelect,
   getActiveClassNames, getActiveGoal, setGoal, completeGoal,
   recordStreak, getStreak, getClassStats, isFirstInteractionToday,
-  updateRenewalIntent,
+  updateRenewalIntent, readClassName,
 } from '@/lib/user';
 import {
   extractCoachingTags, saveCoachingTags,
@@ -542,7 +542,9 @@ async function bufferAndSchedule(replyToken, userId, text) {
         const u = await getUser(userId);
         const studentName = u?.info?.name || u?.lineDisplayName || userId?.substring(0, 8) || '同學';
         const oldIntent = u?.renewalIntent || null;
-        const className = u?.class_name || u?.className || null;
+        // 用 readClassName helper：camelCase 優先，snake_case 後備（契約 §4.2）
+        // 修正 04-22 續報換班 bug 殘體：原本反序 fallback 會優先讀到舊 snake_case 髒資料
+        const className = readClassName(u);
         const newIntent = renewalReply.renewal_intent;
 
         // 3. classStatus gate — 有班級才寫（非學員不寫；即使 expired/grace 也允許）
@@ -1328,8 +1330,8 @@ async function processBatchedMessages(userId, messages) {
   let classStatus = 'active';
   try {
     const checkUser = await getUser(userId);
-    if (checkUser?.className || checkUser?.info?.className) {
-      const cn = checkUser.className || checkUser.info?.className;
+    const cn = readClassName(checkUser) || checkUser?.info?.className;
+    if (cn) {
       classStatus = await getClassStatus(cn) || 'active';
     } else {
       // 沒有 class_name 的學員，從 Supabase 查
