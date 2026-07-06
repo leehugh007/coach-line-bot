@@ -27,6 +27,7 @@ import {
   getActiveClassNames, getActiveGoal, setGoal, completeGoal,
   recordStreak, getStreak, getClassStats, isFirstInteractionToday,
   updateRenewalIntent, readClassName,
+  cleanCorrectedMemory, addUserFacts, getUserFacts,
 } from '@/lib/user';
 import {
   extractCoachingTags, saveCoachingTags,
@@ -326,11 +327,11 @@ async function handleGroupMessage(source, userId, text, mention) {
     let studentContext = '';
     const user = await getUser(userId);
     if (user) {
-      const { buildUserContext } = await import('@/lib/user');
+      const { buildUserContext, getActiveGoal, getUserFacts } = await import('@/lib/user');
       const tags = await getRecentTopics(userId, 15);
-      const { getActiveGoal } = await import('@/lib/user');
       const goal = await getActiveGoal(userId);
-      studentContext = buildUserContext(user, tags, null, goal);
+      const facts = await getUserFacts(userId);
+      studentContext = buildUserContext(user, tags, null, goal, facts);
     }
 
     // 取得群組名稱（用於後台顯示班別）
@@ -1537,8 +1538,9 @@ async function processBatchedMessages(userId, messages) {
     const intent = await classifyIntent(combinedText, recentUserMsgs, userId);
     const profileSlices = intent?.slices || null;
 
-    // === 載入當前目標 ===
+    // === 載入當前目標 + 永久事實 ===
     const activeGoal = await getActiveGoal(userId);
+    const userFacts = await getUserFacts(userId);
 
     // === 🔑 Follow-up 偵測：30 分鐘內已有完整上下文 → 追問可輕量化 ===
     let isFollowUp = false;
@@ -1557,8 +1559,46 @@ async function processBatchedMessages(userId, messages) {
       contextUser,
       isFollowUp ? null : recentTags,
       profileSlices,
-      activeGoal
+      activeGoal,
+      userFacts
     );
+
+    // === 契約_續報記錄.md §5 T3：自由文字說已續報 → 寫 renewal_intent（2026-07-06 補實作）===
+    // 之前只有 QR 路徑（T2）會寫入，學員打字說「我續報了」全靠 chatHistory 兜底，40 則一滾就忘。
+    // 07-02 實測一天 6+ 位學員打字說已續報，全部零記錄。
+    // gate：結業期或已結業 + 尚無 intent（QR 永遠優於關鍵字，不覆蓋）
+    try {
+      const t3Keywords = ['續報', '繼續報', '我有報', '已經報了', '報名了', '我報了'];
+      if (
+        (classStatus === 'graduating' || classStatus === 'grace' || classStatus === 'expired') &&
+        !contextUser?.renewalIntent &&
+        t3Keywords.some(kw => combinedText.includes(kw))
+      ) {
+        const t3Now = new Date();
+        await updateRenewalIntent(userId, { intent: 'interested', at: t3Now, source: 'free_text_keyword' });
+        if (contextUser) contextUser.renewalIntent = 'interested'; // 同輪 contextSuffix 直接吃到新值
+        console.log(`[Renewal T3] ${userId?.substring(0, 8)} free-text keyword hit, intent=interested`);
+
+        // 48hr cooldown 內去重通知教練（跟 T2 共用同一把 key = 跨路徑去重，是想要的行為）
+        try {
+          const { Redis: _RT3 } = await import('@upstash/redis');
+          const _rT3 = new _RT3({ url: process.env.KV_REST_API_URL, token: process.env.KV_REST_API_TOKEN });
+          const cdKey = `coach-renewal-notify-cd:${userId}`;
+          const inCooldown = await _rT3.get(cdKey);
+          if (!inCooldown) {
+            const t3User = contextUser || await getUser(userId);
+            const studentName = t3User?.info?.name || t3User?.displayName || userId.substring(0, 8);
+            const evidence = [...combinedText].slice(0, 50).join(''); // code point 截斷，防切到 emoji 代理對
+            await notifyRenewalInterest(studentName, 'interested', evidence, null);
+          }
+          await _rT3.set(cdKey, t3Now.toISOString(), { ex: 172800 });
+        } catch (notifyErr) {
+          console.error('[Renewal T3] notify error (non-fatal):', notifyErr.message);
+        }
+      }
+    } catch (t3Err) {
+      console.error('[Renewal T3] error (non-fatal):', t3Err.message);
+    }
 
     // === 續報提示：第 1 層 confirmed_at 優先 / 第 2-5 層結業期邏輯 ===
     // 契約_續報記錄.md §4 + §10 Phase 2.1
@@ -1751,27 +1791,33 @@ async function backgroundTagProcessing(userId, userText, aiReply) {
           corrUser?.info?.goal ? `個人目標：${corrUser.info.goal}` : '',
         ].filter(Boolean).join('\n');
 
-        if (systemMemory) {
+        // 就算系統記憶是空的也要跑：糾正可能針對知識庫給的建議（例：「美國沒有超商」
+        // 從來不在 tags/goals 裡，但值得記成永久事實，否則台灣中心的知識注入會一直長回來）
+        {
           let matchedTopics = [];
+          let newFacts = [];
           try {
             const aiPrompt = `用戶說：「${userText.substring(0, 200)}」
 
 系統目前記住的：
-${systemMemory}
+${systemMemory || '（沒有記錄）'}
 
 判斷：用戶有沒有在「永久糾正」系統記錯的事？
 
 永久糾正 = 用戶明確說某件事「根本不是事實」或「從來就沒有」。例如：
-- 「我根本沒吃蘿蔔乾」= 系統以為有吃，但沒有 → ["蘿蔔乾"]
-- 「膝蓋沒問題」= 系統以為有問題，但沒有 → ["膝蓋"]
-- 「腎臟發炎是我爸爸的不是我的」= 系統記錯人了 → ["腎臟發炎"]
+- 「我根本沒吃蘿蔔乾」= 系統以為有吃，但沒有 → remove:["蘿蔔乾"]，facts:["不吃蘿蔔乾、也不喜歡"]
+- 「膝蓋沒問題」= 系統以為有問題，但沒有 → remove:["膝蓋"]，facts:[]
+- 「我住美國，沒有台灣那種超商」= 環境限制 → remove:["超商"]，facts:["住美國，沒有台灣的便利商店"]
+- 「腎臟發炎是我爸爸的不是我的」= 記錯人 → remove:["腎臟發炎"]，facts:[]
 
-不是糾正（不要列）：
+不是糾正（remove 和 facts 都留空）：
 - 「今天不超慢跑」= 今天的選擇，不代表沒有這個習慣
 - 「最近沒有跳舞」= 暫時沒做，但還是她的習慣
 - 「好的沒問題」= 回應對方，不是糾正
 
-只回傳被永久糾正的核心詞 JSON 陣列（2-4字）。沒有就回 []`;
+facts 規則：只記「以後給建議必須遵守的客觀長期事實」（不吃什麼、過敏、環境限制、飲食限制），每條 20 字內，直接陳述。只記客觀事實，不記情緒、個性評價或健康病史（例：不要寫「很固執」「容易放棄」「有胃潰瘍」）。糾正錯誤但沒有長期意義的（記錯人、一次性誤會）不用記。
+
+只回傳 JSON：{"remove": ["核心詞2-4字"], "facts": ["事實句"]}。沒有就回 {"remove": [], "facts": []}`;
 
             const GEMINI_KEY = process.env.GEMINI_API_KEY;
             const aiRes = await fetch(
@@ -1781,7 +1827,7 @@ ${systemMemory}
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                   contents: [{ role: 'user', parts: [{ text: aiPrompt }] }],
-                  generationConfig: { temperature: 0, maxOutputTokens: 100, thinkingConfig: { thinkingBudget: 0 } },
+                  generationConfig: { temperature: 0, maxOutputTokens: 200, thinkingConfig: { thinkingBudget: 0 } },
                 }),
               }
             );
@@ -1792,67 +1838,46 @@ ${systemMemory}
                 const { trackApiUsage } = await import('@/lib/cost-tracker');
                 trackApiUsage(userId, 'correction_detect', 'gemini-2.5-flash-lite', aiData);
               }
-              const aiText = aiData?.candidates?.[0]?.content?.parts?.filter(p => p.text).pop()?.text?.trim() || '[]';
-              const jsonMatch = aiText.match(/\[[\s\S]*?\]/);
-              if (jsonMatch) {
-                const parsed = JSON.parse(jsonMatch[0]);
-                if (Array.isArray(parsed)) {
-                  matchedTopics = parsed.filter(t => typeof t === 'string' && t.length >= 2);
+              const aiText = aiData?.candidates?.[0]?.content?.parts?.filter(p => p.text).pop()?.text?.trim() || '{}';
+              // 新格式 {"remove":[],"facts":[]}；facts 解析失敗絕不拖累 remove 主線
+              const objMatch = aiText.match(/\{[\s\S]*\}/);
+              if (objMatch) {
+                try {
+                  const parsed = JSON.parse(objMatch[0]);
+                  if (Array.isArray(parsed.remove)) {
+                    matchedTopics = parsed.remove.filter(t => typeof t === 'string' && t.length >= 2);
+                  }
+                  if (Array.isArray(parsed.facts)) {
+                    newFacts = parsed.facts.filter(t => typeof t === 'string');
+                  }
+                } catch (_) { /* fallthrough 舊格式 */ }
+              }
+              // 降級：AI 回舊的純陣列格式 → 當 remove 用
+              if (matchedTopics.length === 0 && newFacts.length === 0) {
+                const arrMatch = aiText.match(/\[[\s\S]*?\]/);
+                if (arrMatch) {
+                  try {
+                    const arr = JSON.parse(arrMatch[0]);
+                    if (Array.isArray(arr)) {
+                      matchedTopics = arr.filter(t => typeof t === 'string' && t.length >= 2);
+                    }
+                  } catch (_) { /* non-fatal */ }
                 }
               }
             }
-            console.log(`[Correction] AI detected: ${JSON.stringify(matchedTopics)}`);
+            console.log(`[Correction] AI detected: remove=${JSON.stringify(matchedTopics)}, facts=${JSON.stringify(newFacts)}`);
           } catch (aiErr) {
             console.error('[Correction] AI detection failed (non-fatal):', aiErr.message);
           }
 
-          // Code 清理：三層
+          // 清理：共用 helper（tags + goals + coach-goal Redis 快取 + topics/summary/journey + 回收舊 facts）
+          // 2026-07-06 根因修復：舊版只清 Supabase goals，Redis coach-goal 無 TTL 永生 → 蘿蔔乾/超商循環
           if (matchedTopics.length > 0) {
-            // Redis 連線共用（不在迴圈內重複建立）
-            let _rCorr;
-            try {
-              const { Redis } = await import('@upstash/redis');
-              _rCorr = new Redis({ url: process.env.KV_REST_API_URL, token: process.env.KV_REST_API_TOKEN });
-            } catch (_) {}
-
-            for (const topic of matchedTopics) {
-              console.log(`[Correction] Cleaning: "${topic}"`);
-
-              // 1. Supabase coaching_tags：刪含關鍵字的整筆
-              if (sb) {
-                try {
-                  const { data: deleted } = await sb.from('coaching_tags')
-                    .delete()
-                    .eq('user_id', userId)
-                    .or(`core_issue.ilike.%${topic}%,progress_detail.ilike.%${topic}%`)
-                    .select('id');
-                  console.log(`[Correction] Deleted ${deleted?.length || 0} tags containing "${topic}"`);
-                } catch (e) {
-                  console.error(`[Correction] Tag cleanup error:`, e.message);
-                }
-
-                // 2. Supabase goals：刪含關鍵字的目標
-                try {
-                  await sb.from('goals')
-                    .update({ status: 'replaced' })
-                    .eq('user_id', userId)
-                    .eq('status', 'active')
-                    .ilike('goal_text', `%${topic}%`);
-                } catch (e) { /* non-fatal */ }
-              }
-            }
-
-            // 3. Redis cache：清一次就好（不用每個 topic 清一次）
-            if (_rCorr) {
-              try {
-                await Promise.all([
-                  _rCorr.del(`coach:${userId}:topics`),
-                  _rCorr.del(`coach:${userId}:summary`),
-                  _rCorr.del(`coach:${userId}:journey`),
-                ]);
-                console.log(`[Correction] Redis cache cleared for ${userId?.substring(0, 8)}`);
-              } catch (e) { /* non-fatal */ }
-            }
+            await cleanCorrectedMemory(userId, matchedTopics);
+          }
+          // 正向記住學員糾正的事實（永久注入 context，防台灣中心知識建議長回來）
+          if (newFacts.length > 0) {
+            await addUserFacts(userId, newFacts);
           }
         }
       }

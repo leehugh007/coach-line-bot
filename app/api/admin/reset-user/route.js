@@ -41,6 +41,7 @@ export async function DELETE(request) {
       `coach:${userId}:summary`,
       `coach:${userId}:journey`,
       `coach-goal:${userId}`,
+      `coach-facts:${userId}`,
       `coach-push-log:${userId}`,
       `coach-week-push:${userId}`,
       `coach-portrait:${userId}`,

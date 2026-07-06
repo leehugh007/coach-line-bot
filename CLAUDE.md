@@ -109,6 +109,9 @@ coach:{userId}:milestones      → 里程碑（Set）
 coach:{userId}:summary         → AI 心態摘要
 coach:{userId}:journey         → 累積式旅程摘要（500-800 字）
 coach-goal:{userId}            → 當前活躍目標（JSON，無 TTL）
+coach-facts:{userId}           → 永久事實（學員糾正過的事，JSON array，無 TTL，上限 12。
+                                 糾正偵測寫入，buildUserContext 永遠注入，reset-user 會清。
+                                 TODO: Supabase MCP 授權後補 users 表欄位做雙層備份）
 coach-streak:{userId}          → 健康存摺連續天數
 coach-pending:items            → 群組問題待回應（LIST, max 100）
 coach-pending-class:{userId}   → 等待選班的用戶（7天 TTL）

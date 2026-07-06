@@ -18,7 +18,7 @@ import { NextResponse } from 'next/server';
 import { pushMessage, pushWithQuickReply } from '@/lib/line';
 import { addChatMessage } from '@/lib/chat';
 import { getSupabase } from '@/lib/supabase';
-import { getActiveGoal, getClassStats } from '@/lib/user';
+import { getActiveGoal, getClassStats, cleanCorrectedMemory, addUserFacts } from '@/lib/user';
 import { getClass } from '@/lib/classes';
 import { Redis } from '@upstash/redis';
 
@@ -856,28 +856,31 @@ async function reconcileCorrectionCheck(sb, r) {
       activeGoals?.length ? `目標：${activeGoals.map(g => g.goal_text).join('、')}` : '',
     ].filter(Boolean).join('\n');
 
-    if (!systemMemory) continue;
+    // 2026-07-06：系統記憶空也照跑 — 糾正可能針對知識庫建議（例：美國沒超商），要記成永久事實
 
-    // AI 判定
+    // AI 判定（跟 route.js 即時偵測同一套 prompt，輸出 {"remove":[],"facts":[]}）
     try {
       const aiPrompt = `用戶今天說了這些：「${msgs.substring(0, 300)}」
 
 系統目前記住的：
-${systemMemory}
+${systemMemory || '（沒有記錄）'}
 
 判斷：用戶有沒有在「永久糾正」系統記錯的事？
 
 永久糾正 = 用戶明確說某件事「根本不是事實」或「從來就沒有」。例如：
-- 「我根本沒吃蘿蔔乾」= 系統以為有吃，但沒有 → ["蘿蔔乾"]
-- 「膝蓋沒問題」= 系統以為有問題，但沒有 → ["膝蓋"]
-- 「腎臟發炎是我爸爸的不是我的」= 系統記錯人了 → ["腎臟發炎"]
+- 「我根本沒吃蘿蔔乾」= 系統以為有吃，但沒有 → remove:["蘿蔔乾"]，facts:["不吃蘿蔔乾、也不喜歡"]
+- 「膝蓋沒問題」= 系統以為有問題，但沒有 → remove:["膝蓋"]，facts:[]
+- 「我住美國，沒有台灣那種超商」= 環境限制 → remove:["超商"]，facts:["住美國，沒有台灣的便利商店"]
+- 「腎臟發炎是我爸爸的不是我的」= 記錯人 → remove:["腎臟發炎"]，facts:[]
 
-不是糾正（不要列）：
+不是糾正（remove 和 facts 都留空）：
 - 「今天不超慢跑」= 今天的選擇，不代表沒有這個習慣
 - 「最近沒有跳舞」= 暫時沒做，但還是她的習慣
 - 「好的沒問題」= 回應對方，不是糾正
 
-只回傳被永久糾正的核心詞 JSON 陣列（2-4字）。沒有就回 []`;
+facts 規則：只記「以後給建議必須遵守的客觀長期事實」（不吃什麼、過敏、環境限制、飲食限制），每條 20 字內，直接陳述。只記客觀事實，不記情緒、個性評價或健康病史（例：不要寫「很固執」「容易放棄」「有胃潰瘍」）。
+
+只回傳 JSON：{"remove": ["核心詞2-4字"], "facts": ["事實句"]}。沒有就回 {"remove": [], "facts": []}`;
 
       const GEMINI_KEY = process.env.GEMINI_API_KEY;
       const aiRes = await fetch(
@@ -887,7 +890,7 @@ ${systemMemory}
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             contents: [{ role: 'user', parts: [{ text: aiPrompt }] }],
-            generationConfig: { temperature: 0, maxOutputTokens: 100, thinkingConfig: { thinkingBudget: 0 } },
+            generationConfig: { temperature: 0, maxOutputTokens: 200, thinkingConfig: { thinkingBudget: 0 } },
           }),
         }
       );
@@ -899,30 +902,35 @@ ${systemMemory}
           trackApiUsage(uid, 'reconcile_correction', 'gemini-2.5-flash-lite', aiData);
         } catch (_) {}
 
-        const aiText = aiData?.candidates?.[0]?.content?.parts?.filter(p => p.text).pop()?.text?.trim() || '[]';
-        const jsonMatch = aiText.match(/\[[\s\S]*?\]/);
-        if (jsonMatch) {
-          const topics = JSON.parse(jsonMatch[0]).filter(t => typeof t === 'string' && t.length >= 2);
-          for (const topic of topics) {
-            console.log(`[Reconcile] Cleaning "${topic}" for ${uid.substring(0, 8)}`);
-            // 清 coaching_tags
-            await sb.from('coaching_tags').delete()
-              .eq('user_id', uid)
-              .or(`core_issue.ilike.%${topic}%,progress_detail.ilike.%${topic}%`);
-            // 清 goals
-            await sb.from('goals').update({ status: 'replaced' })
-              .eq('user_id', uid).eq('status', 'active')
-              .ilike('goal_text', `%${topic}%`);
-            cleaned++;
+        const aiText = aiData?.candidates?.[0]?.content?.parts?.filter(p => p.text).pop()?.text?.trim() || '{}';
+        let topics = [];
+        let facts = [];
+        const objMatch = aiText.match(/\{[\s\S]*\}/);
+        if (objMatch) {
+          try {
+            const parsed = JSON.parse(objMatch[0]);
+            if (Array.isArray(parsed.remove)) topics = parsed.remove.filter(t => typeof t === 'string' && t.length >= 2);
+            if (Array.isArray(parsed.facts)) facts = parsed.facts.filter(t => typeof t === 'string');
+          } catch (_) { /* fallthrough 舊格式 */ }
+        }
+        // 降級：舊純陣列格式 → 當 remove 用
+        if (topics.length === 0 && facts.length === 0) {
+          const arrMatch = aiText.match(/\[[\s\S]*?\]/);
+          if (arrMatch) {
+            try {
+              const arr = JSON.parse(arrMatch[0]);
+              if (Array.isArray(arr)) topics = arr.filter(t => typeof t === 'string' && t.length >= 2);
+            } catch (_) { /* non-fatal */ }
           }
-          if (topics.length > 0) {
-            // 清 Redis cache
-            await Promise.allSettled([
-              r.del(`coach:${uid}:topics`),
-              r.del(`coach:${uid}:summary`),
-              r.del(`coach:${uid}:journey`),
-            ]);
-          }
+        }
+
+        // 清理走共用 helper（含 Redis coach-goal — 2026-07-06 根因：舊版漏清導致錯誤目標永生）
+        if (topics.length > 0) {
+          await cleanCorrectedMemory(uid, topics);
+          cleaned += topics.length;
+        }
+        if (facts.length > 0) {
+          await addUserFacts(uid, facts);
         }
       }
     } catch (e) {
