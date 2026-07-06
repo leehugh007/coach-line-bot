@@ -284,8 +284,18 @@ async function handleGroupMessage(source, userId, text, mention) {
     return;
   }
   // displayName 比對排除工作人員（不依賴 DB）
+  // 2026-07-06：比對精確化 — 舊版全用 includes，'jie'/'chao'/'凜' 這種短字串會誤傷
+  // 名字剛好含這些字母的學員（整則被跳過且無痕跡，是心得/自介被漏的原因之一）
   const staffNames = ['Susan', 'Uzzi', '楊子緣', '彥綺', 'chao', 'jie', '黃湘儒', 'Mandy', '凜', 'Evelyn', '何啟維', '郁淳', '營養師', '助教', '教練'];
-  if (staffNames.some(kw => displayName.includes(kw))) {
+  const isStaffName = staffNames.some(kw => {
+    if (/^[a-z]+$/i.test(kw)) {
+      // 英文關鍵字：word-boundary 比對（"Jie Wang" 算、"Angelie" 不算）
+      return new RegExp(`(^|[^a-z])${kw}($|[^a-z])`, 'i').test(displayName);
+    }
+    if (kw.length === 1) return displayName === kw; // 單字中文（凜）：全名相等才算
+    return displayName.includes(kw); // 多字中文照舊
+  });
+  if (isStaffName) {
     console.log(`[Group] Staff (name: ${displayName}), skip`);
     return;
   }
