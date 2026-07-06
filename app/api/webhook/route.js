@@ -1722,8 +1722,27 @@ async function processBatchedMessages(userId, messages) {
     await addChatMessage(userId, 'user', combinedText);
     await addChatMessage(userId, 'assistant', reply);
 
-    // === 送出回覆 ===
-    const result = await sendMessage(lastReplyToken, userId, reply);
+    // === 送出回覆（P1-2 對話微互動：聊到題庫食物 → 順口帶一題同分類的）===
+    // 2026-07-06 設計：遊戲化使用數據（30 天 quiz 11 次）證明「要學員主動去玩」場景不對，
+    // 改成聊天中自然出題。考同分類的不同食物（考剛聊的那個 = AI 回覆裡已有答案）。
+    let microQuiz = null;
+    try {
+      microQuiz = await maybeBuildMicroQuiz(userId, combinedText, intent?.mood);
+    } catch (e) { /* non-fatal，出題失敗不影響主回覆 */ }
+
+    let result;
+    if (microQuiz) {
+      try {
+        await replyWithQuickReply(lastReplyToken, `${reply}\n\n${microQuiz.question}`, microQuiz.quickReplies);
+        result = { method: 'reply+quiz' };
+        console.log(`[MicroQuiz] Attached: ${microQuiz.food} for ${userId?.substring(0, 8)}`);
+      } catch (qErr) {
+        // Quick Reply 失敗（replyToken 過期等）→ 降級純文字，pending 5min 自動過期無妨
+        result = await sendMessage(lastReplyToken, userId, reply);
+      }
+    } else {
+      result = await sendMessage(lastReplyToken, userId, reply);
+    }
     console.log(`[MSG] Reply sent via ${result.method} (${reply.length} chars)`);
 
     // === 標籤抽取 & 糾正偵測（await 確保 Vercel 不會提前終止）===
@@ -1742,6 +1761,66 @@ async function processBatchedMessages(userId, messages) {
       '抱歉，我剛才腦袋打結了。可以再跟我說一次嗎？'
     );
   }
+}
+
+/**
+ * P1-2 對話微互動：訊息提到題庫食物 → 出一題「同分類的另一個食物」
+ *
+ * 防打擾規則（全部要過才出題）：
+ * - 情緒型對話不出（mood ∈ anxious/frustrated/sad/guilty）
+ * - 一天最多一題（台灣時間，Redis coach-microquiz:{uid}）
+ * - 已有 pending 測驗不疊加
+ * - 同分類裡沒有「還沒收集過」的食物 → 不出（不重複考已會的）
+ *
+ * @returns {{ food, question, quickReplies } | null}
+ */
+async function maybeBuildMicroQuiz(userId, text, mood) {
+  if (!text || text.length < 4) return null;
+  if (['anxious', 'frustrated', 'sad', 'guilty'].includes(mood)) return null;
+
+  // 訊息裡有沒有提到題庫食物（≥2 字防單字誤中）
+  const mentioned = FOOD_QUIZZES.find(q => q.food.length >= 2 && text.includes(q.food));
+  if (!mentioned) return null;
+
+  const { Redis: _RQ } = await import('@upstash/redis');
+  const r = new _RQ({ url: process.env.KV_REST_API_URL, token: process.env.KV_REST_API_TOKEN });
+
+  // 一天一題（TTL 到台灣時間隔天 00:00）
+  const dailyKey = `coach-microquiz:${userId}`;
+  if (await r.get(dailyKey)) return null;
+  // 已有進行中的測驗不疊加
+  if (await r.get(`coach-quiz-pending:${userId}`)) return null;
+
+  // 同分類、非提到的那個、優先沒收集過的
+  const answered = (await r.smembers(`coach-quiz:${userId}`)) || [];
+  const pool = FOOD_QUIZZES.filter(q =>
+    q.category === mentioned.category &&
+    q.food !== mentioned.food &&
+    !answered.includes(q.food)
+  );
+  if (pool.length === 0) return null;
+  const quiz = pool[Math.floor(Math.random() * pool.length)];
+
+  // 設當日鎖 + pending（讓既有答題流程接手）
+  const _now = new Date();
+  const _twNow = new Date(_now.getTime() + 8 * 60 * 60 * 1000);
+  const _twMid = new Date(_twNow);
+  _twMid.setUTCHours(24, 0, 0, 0);
+  const _ttl = Math.max(Math.floor((_twMid - _twNow) / 1000), 60);
+  await r.set(dailyKey, '1', { ex: _ttl });
+  await r.set(`coach-quiz-pending:${userId}`, JSON.stringify({
+    type: 'food', food: quiz.food, optA: quiz.optA, optB: quiz.optB,
+  }), { ex: 300 });
+
+  return {
+    food: quiz.food,
+    question: `欸講到${mentioned.food}，順便考你一個類似的 😄\n${quiz.food}是${quiz.optA}還是${quiz.optB}？`,
+    quickReplies: [
+      { label: quiz.optA, text: `食物分類答：${quiz.food}→${quiz.optA}` },
+      { label: quiz.optB, text: `食物分類答：${quiz.food}→${quiz.optB}` },
+    ],
+    // 不放「先不玩」按鈕：學員不理它，pending 5 分鐘自動過期，零壓力
+  };
 }
 
 /**

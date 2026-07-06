@@ -23,6 +23,7 @@ export default function AdminPage() {
   const [pendingLoading, setPendingLoading] = useState(false);
   const [pendingError, setPendingError] = useState('');
   const [copiedId, setCopiedId] = useState('');
+  const [featuredId, setFeaturedId] = useState('');
 
   // 手動草稿生成
   const [manualMessage, setManualMessage] = useState('');
@@ -146,6 +147,29 @@ export default function AdminPage() {
       }
     } catch (err) {
       console.error('Clear error:', err);
+    }
+  }
+
+  // P2 每週精選：把這則問答（匿名化後）加入週三推播佇列
+  async function featureItem(item) {
+    try {
+      const res = await fetch('/api/admin/feature', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-admin-key': adminKey },
+        body: JSON.stringify({
+          question: item.message,
+          answer: item.draft,
+          studentName: item.studentName,
+        }),
+      });
+      if (res.ok) {
+        setFeaturedId(item.id);
+        setTimeout(() => setFeaturedId(''), 2500);
+      } else {
+        alert('加入精選失敗');
+      }
+    } catch {
+      alert('加入精選失敗');
     }
   }
 
@@ -521,6 +545,13 @@ export default function AdminPage() {
                   }}
                 >
                   {copiedId === item.id ? '已複製！' : '複製草稿'}
+                </button>
+                <button
+                  onClick={() => featureItem(item)}
+                  title="加入每週三「本週好問題」推播佇列（會自動匿名化）"
+                  style={{ padding: '10px 14px', border: '1px solid #FFB300', borderRadius: 8, fontSize: 14, cursor: 'pointer', background: featuredId === item.id ? '#FFB300' : 'white', color: featuredId === item.id ? 'white' : '#F57C00' }}
+                >
+                  {featuredId === item.id ? '已加入精選' : '⭐ 精選'}
                 </button>
                 <button
                   onClick={() => dismissPending(item.id)}

@@ -477,6 +477,8 @@ export async function GET(request) {
       result = await handleRenewalNoonPush(sb, r, users, classMap, now);
     } else if (type === 'abc-quiz') {
       result = await handleAbcQuizPush(sb, r, users, classMap, now);
+    } else if (type === 'featured') {
+      result = await handleFeaturedPush(sb, r, users, classMap, now);
     } else {
       return NextResponse.json({ error: `Unknown type: ${type}` }, { status: 400 });
     }
@@ -486,6 +488,59 @@ export async function GET(request) {
     console.error(`[SmartPush:${type}] Error:`, err);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
+}
+
+// ===================================================================
+// 0.5 每週精選好問題（週三 12:00）— P2 群體感設計（2026-07-06）
+// 匿名精選取代人數統計：群體感來自「別人也在掙扎、也在前進」，不是人數。
+// 佇列由教練在 admin 後台按「⭐ 精選」餵入（/api/admin/feature，已匿名化）。
+// ===================================================================
+
+async function handleFeaturedPush(sb, r, users, classMap, now) {
+  // 週鎖：cron 重複觸發 / 手動補跑不重發
+  const lockKey = 'coach-featured:week-lock';
+  if (await r.get(lockKey)) {
+    return { pushed: 0, note: 'already sent this week' };
+  }
+
+  const raw = await r.rpop('coach-featured:queue'); // FIFO：最早精選的先發
+  if (!raw) {
+    return { pushed: 0, note: 'queue empty' };
+  }
+  const item = typeof raw === 'string' ? JSON.parse(raw) : raw;
+  if (!item?.question || !item?.answer) {
+    return { pushed: 0, note: 'bad item, dropped' };
+  }
+
+  const text = `📩 本週好問題
+
+有位同學問：
+「${item.question}」
+
+${item.answer}
+
+你有類似的疑問嗎？直接問我就好 😊`;
+
+  let pushed = 0;
+  for (const user of users) {
+    const classInfo = classMap[user.class_name];
+    if (!classInfo?.startDate) continue;
+    // 只推上課中的班（結業/過期學員不推，服務分級）
+    const startDate = new Date(classInfo.startDate);
+    const endDate = classInfo.endDate ? new Date(classInfo.endDate) : null;
+    if (now < startDate || (endDate && now > endDate)) continue;
+
+    try {
+      await pushMessage(user.id, text);
+      pushed++;
+    } catch (e) {
+      console.error(`[Featured] Push failed for ${user.id?.substring(0, 8)}:`, e.message);
+    }
+  }
+
+  await r.set(lockKey, '1', { ex: 86400 * 6 }); // 6 天後自動解鎖，下週三可再發
+  console.log(`[Featured] Pushed to ${pushed} students`);
+  return { pushed };
 }
 
 // ===================================================================
