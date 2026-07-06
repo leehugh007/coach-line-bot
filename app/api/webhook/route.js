@@ -248,7 +248,7 @@ async function handleGroupMessage(source, userId, text, mention) {
         } catch (_) {}
         const groupLabel = groupName ? `【${groupName}】` : '';
 
-        const draft = await generateDraftResponse(trimmed, '', userId, []);
+        const draft = await generateDraftResponse(trimmed, '', userId, [], displayName);
         if (draft) {
           await savePendingItem({
             groupId,
@@ -346,7 +346,8 @@ async function handleGroupMessage(source, userId, text, mention) {
     // === 問題處理 ===
     if (detection.isQuestion && confidence >= 0.8) {
       const topic = detection.topic || 'other';
-      const draft = await generateDraftResponse(trimmed, studentContext, userId, groupContext);
+      // slice(0, -1)：buffer 最後一則就是觸發訊息本身，去尾避免跟【現在要回覆的訊息】重複（對齊 aiDetectQuestion）
+      const draft = await generateDraftResponse(trimmed, studentContext, userId, groupContext.slice(0, -1), displayName);
       if (!draft) {
         console.log('[Group-Q] Draft generation failed, skipping');
       } else {
@@ -383,7 +384,7 @@ async function handleGroupMessage(source, userId, text, mention) {
 
     // === 心得分享處理 ===
     if (isAchievement) {
-      const draft = await generateAchievementDraftResponse(trimmed, studentContext, userId, groupContext);
+      const draft = await generateAchievementDraftResponse(trimmed, studentContext, userId, groupContext.slice(0, -1), displayName);
       if (!draft) {
         console.log('[Group-A] Achievement draft generation failed, skipping');
       } else {

@@ -25,7 +25,7 @@ export async function POST(request) {
     }
 
     const studentContext = studentName ? `學員名字：${studentName}` : '';
-    const draft = await generateDraftResponse(message.trim(), studentContext);
+    const draft = await generateDraftResponse(message.trim(), studentContext, null, [], studentName || null);
 
     if (!draft) {
       return NextResponse.json({ error: 'AI 產生草稿失敗，請重試' }, { status: 500 });
