@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import * as XLSX from 'xlsx';
+import { formatStudentImportPreview, parseStudentImportLine } from '@/lib/student-import.mjs';
 
 const STATUS_MAP = {
   active: { label: '🟢 活躍', color: '#2E7D32', bg: '#E8F5E9' },
@@ -138,17 +139,11 @@ export default function StaffPage() {
   // Import
   const handleImport = async () => {
     if (!importText.trim() || !importClassName) return alert('請填寫名單和選擇班級');
-    // 每行一個學員，格式：LINE名稱 | 真實姓名 | 自介（可選）
+    // 每行一個學員，格式：LINE名稱 | 真實姓名 | 學員編號 | 自介（可選）
     const lines = importText.trim().split('\n').filter(l => l.trim());
-    const students = lines.map(line => {
-      const parts = line.split('|').map(p => p.trim());
-      return {
-        lineName: parts[0] || '',
-        realName: parts[1] || parts[0] || '',
-        className: importClassName,
-        intro: parts[2] || '',
-      };
-    }).filter(s => s.lineName);
+    const students = lines
+      .map(line => parseStudentImportLine(line, importClassName))
+      .filter(s => s.lineName);
 
     const res = await fetch('/api/admin/import', {
       method: 'POST',
@@ -688,11 +683,7 @@ export default function StaffPage() {
                       const lineName = String(r[lineCol]).trim();
                       const realName = nameCol ? String(r[nameCol] || '').trim() : '';
                       const studentId = idCol ? String(r[idCol] || '').trim() : '';
-                      const subClass = subClassCol ? String(r[subClassCol] || '').trim() : '';
-                      const parts = [lineName];
-                      if (realName) parts.push(realName);
-                      if (studentId) parts.push(studentId);
-                      return parts.join(' | ');
+                      return formatStudentImportPreview({ lineName, realName, studentId });
                     }).join('\n');
 
                     setImportText(preview);
@@ -724,12 +715,12 @@ export default function StaffPage() {
             {/* 或文字貼上 */}
             <div style={{ marginBottom: 12 }}>
               <label style={{ fontSize: 13, color: '#666', display: 'block', marginBottom: 4 }}>
-                或直接貼上（每行一位：LINE 名稱 | 真實姓名 | 自介）
+                或直接貼上（每行一位：LINE 名稱 | 真實姓名 | 學員編號 | 自介）
               </label>
               <textarea
                 value={importText}
                 onChange={e => setImportText(e.target.value)}
-                placeholder={'Elaine Yeh | 宜萍 | 金融業，第二期學員\nAnnie | Annie | 12月班班長'}
+                placeholder={'Elaine Yeh | 宜萍 | 2609001-1 | 金融業，第二期學員\nAnnie | Annie | 2609001-2 | 12月班班長'}
                 rows={8}
                 style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid #ddd', fontSize: 14, fontFamily: 'monospace', resize: 'vertical' }}
               />

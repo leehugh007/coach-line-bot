@@ -37,6 +37,18 @@ import { NextResponse } from 'next/server';
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
+async function generateDraftWithRetry(...args) {
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const draft = await generateDraftResponse(...args);
+    if (draft) return draft;
+    if (attempt < 2) {
+      console.warn('[Group] Intro draft retry 1/1');
+      await sleep(300);
+    }
+  }
+  return null;
+}
+
 export const maxDuration = 120;
 
 export async function POST(request) {
@@ -233,13 +245,15 @@ async function handleGroupMessage(source, userId, text, mention) {
         if (user) {
           user.lineDisplayName = displayName;
           const { saveUser } = await import('@/lib/user');
-          await saveUser(userId, user);
+          const saved = await saveUser(userId, user, { awaitSupabase: true });
+          if (!saved) throw new Error('Failed to persist intro display name');
         }
       } catch (err) {
         console.error('[Group] Intro processing error:', err);
       }
 
-      // 2b. 通知教練：產草稿 + 送 pending + push 通知
+      // 2b. 產草稿 + 送 pending + push 通知。
+      // 草稿 AI 失敗時仍建立 fallback pending，保留完整原文供人工處理。
       try {
         let groupName = '';
         try {
@@ -248,32 +262,32 @@ async function handleGroupMessage(source, userId, text, mention) {
         } catch (_) {}
         const groupLabel = groupName ? `【${groupName}】` : '';
 
-        const draft = await generateDraftResponse(trimmed, '', userId, [], displayName);
-        if (draft) {
-          await savePendingItem({
-            groupId,
-            groupName: groupLabel,
-            userId,
-            studentName: displayName,
-            message: trimmed,
-            topic: 'self_intro',
-            draft,
-          });
+        const generatedDraft = await generateDraftWithRetry(trimmed, '', userId, [], displayName);
+        const mentionPrefix = displayName && displayName !== '未知' ? `@${displayName} ` : '';
+        const draft = generatedDraft
+          || `${mentionPrefix}謝謝你這麼完整地分享自己的歷程和目標。這段自我介紹我先完整記下來了，休校長會再仔細看過後回覆你 😊`;
 
-          const notifyTargets = [process.env.COACH_USER_ID, process.env.STAFF_USER_ID].filter(Boolean);
-          const notifyMsg = `${groupLabel} 🟢 新學員自我介紹\n學員：${displayName}\n\n後台有草稿，可以去複製回覆 ☺️`;
-          await Promise.all(notifyTargets.map(id => pushMessage(id, notifyMsg).catch(() => {})));
-        }
+        await savePendingItem({
+          groupId,
+          groupName: groupLabel,
+          userId,
+          studentName: displayName,
+          message: trimmed,
+          topic: 'self_intro',
+          draft,
+        });
+
+        const notifyTargets = [process.env.COACH_USER_ID, process.env.STAFF_USER_ID].filter(Boolean);
+        const draftLabel = generatedDraft ? '後台有草稿' : '草稿生成失敗，後台已保留自介與備用草稿';
+        const notifyMsg = `${groupLabel} 🟢 新學員自我介紹\n學員：${displayName}\n\n${draftLabel}，可以去複製回覆 ☺️`;
+        await Promise.all(notifyTargets.map(id => pushMessage(id, notifyMsg).catch(() => {})));
       } catch (err) {
         console.error('[Group] Intro notify error:', err);
       }
     };
 
-    if (globalThis.__nextWaitUntil) {
-      globalThis.__nextWaitUntil(introBackground());
-    } else {
-      introBackground().catch(err => console.error('[Group] Intro bg error:', err));
-    }
+    // 必須 await：外層 POST 的 waitUntil 才能涵蓋完整自介流程，避免回 200 後工作被凍結。
+    await introBackground();
     return;
   }
 
@@ -1521,10 +1535,12 @@ async function processBatchedMessages(userId, messages) {
     let isIntro = false;
     if (looksLikeIntroduction(combinedText)) {
       isIntro = true;
-      processIntroduction(userId, combinedText).catch(err =>
-        console.error('[User] Intro processing error:', err)
-      );
-      console.log(`[Intro] Detected for ${userId?.substring(0, 8)}, processing...`);
+      try {
+        await processIntroduction(userId, combinedText);
+        console.log(`[Intro] Processed for ${userId?.substring(0, 8)}`);
+      } catch (err) {
+        console.error('[User] Intro processing error:', err);
+      }
     }
 
     // === 記錄「今天第一次互動」狀態（recordInteraction 前，否則 lastInteractionAt 已更新）===
