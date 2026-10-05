@@ -20,6 +20,7 @@ import { addChatMessage } from '@/lib/chat';
 import { getSupabase } from '@/lib/supabase';
 import { getActiveGoal, getClassStats, cleanCorrectedMemory, addUserFacts } from '@/lib/user';
 import { getClass } from '@/lib/classes';
+import { formatStudentProgressDetail } from '@/lib/student-progress.mjs';
 import { Redis } from '@upstash/redis';
 
 const PUSH_LOG_PREFIX = 'coach-push-log:';      // 通用推播紀錄（1天冷卻）
@@ -768,7 +769,10 @@ async function handleEveningPush(sb, r, users, classMap, now) {
       .order('created_at', { ascending: false })
       .limit(10);
 
-    const progressItems = (progressRecords || []).filter(p => p.progress_detail);
+    const progressItems = (progressRecords || []).map(p => ({
+      ...p,
+      progress_detail: formatStudentProgressDetail(p.progress_detail),
+    })).filter(p => p.progress_detail);
     const newProgressCount = progressItems.length;
     const lastCount = lastReviewCount ? parseInt(lastReviewCount) : 0;
 

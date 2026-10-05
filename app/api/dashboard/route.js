@@ -8,6 +8,7 @@ import { Redis } from '@upstash/redis';
 import { getSupabase } from '@/lib/supabase';
 import { FOOD_QUIZZES, QUIZ_LEVELS } from '@/lib/quiz-data';
 import { KNOWLEDGE_QUIZZES, KNOWLEDGE_LEVELS } from '@/lib/knowledge-quiz-data';
+import { formatStudentProgressDetail } from '@/lib/student-progress.mjs';
 
 let redis;
 function getRedis() {
@@ -254,9 +255,9 @@ export async function GET(request) {
 
     // 進步紀錄
     const progressRecords = (progressRes.data || []).map(row => ({
-      detail: row.progress_detail,
+      detail: formatStudentProgressDetail(row.progress_detail),
       date: row.created_at,
-    }));
+    })).filter(row => row.detail);
 
     const displayName = userRes.data?.display_name || '學員';
 
