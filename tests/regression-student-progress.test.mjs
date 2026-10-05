@@ -171,3 +171,43 @@ test('student dashboard formats legacy details and omits malformed entries witho
     assert.equal(row.date, '2026-09-30T12:00:00Z');
   });
 });
+
+test('daily chat counts never appear regardless of class activity, and goals retain priority', async () => {
+  const { getSilentMessage } = await loadModule('../app/api/cron/smart-push/route.js', ['getSilentMessage']);
+  for (const todayUniqueUsers of [0, 1, 12, 500]) {
+    for (const daysSilent of [2, 6]) {
+      for (const goal of [null, '正餐先吃兩拳頭蔬菜']) {
+        const message = getSilentMessage(daysSilent, 'Emma', goal, 3, { todayUniqueUsers });
+        assert.ok(message.startsWith('Emma，'));
+        assert.doesNotMatch(message, /今天你們班|個人跟我聊過|位同學聊過/);
+        if (goal) assert.ok(message.includes(goal));
+      }
+    }
+  }
+});
+
+test('real silent push pipeline skips the removed daily-count lookup and keeps history/cooldown', async () => {
+  for (const todayUniqueUsers of [1, 12]) {
+    const { sent, history, redisValues, statsCalls, result } = await runEveningScenario({
+      todayUniqueUsers, celebrated: false, goal: { goal_text: '正餐先吃兩拳頭蔬菜' },
+    });
+    assert.equal(sent.length, 1);
+    assert.equal(result.log[0].type, 'silent-2d');
+    assert.ok(sent[0].text.includes('正餐先吃兩拳頭蔬菜'));
+    assert.doesNotMatch(sent[0].text, /今天你們班|個人跟我聊過/);
+    assert.equal(statsCalls.length, 1, 'only the pre-existing weekly class-goal check may load stats');
+    assert.equal(history[0].text, sent[0].text);
+    assert.ok(redisValues.has('coach-push-log:test-student'));
+  }
+});
+
+test('long-silent quick replies and recent-interaction skip remain intact', async () => {
+  const longSilent = await runEveningScenario({ daysSilent: 8 });
+  assert.equal(longSilent.sent.length, 1);
+  assert.equal(longSilent.result.log[0].type, 'silent-7d');
+  assert.equal(longSilent.sent[0].qr.length, 4);
+  assert.equal(longSilent.redisValues.get('coach-silent-push:test-student'), '1');
+  const active = await runEveningScenario({ daysSilent: 1 });
+  assert.equal(active.sent.length, 0);
+  assert.equal(active.result.pushed, 0);
+});

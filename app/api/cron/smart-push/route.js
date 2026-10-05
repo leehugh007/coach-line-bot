@@ -297,15 +297,10 @@ function getChurnPreventionMessage(daysSilent, name, courseWeek) {
 // 沉默推播內容
 // ===================================================================
 
-function getSilentMessage(daysSilent, name, goalText = null, courseWeek = 1, classStats = null) {
+function getSilentMessage(daysSilent, name, goalText = null, courseWeek = 1) {
   // 沉默 7+ 天 → 問題診斷型推播（讓學員說出心裡話，比知識題更能引發對話）
   if (daysSilent >= 7) {
     return getChurnPreventionMessage(daysSilent, name, courseWeek);
-  }
-
-  // 沉默 2-6 天 + 有班級數據：帶群體存在感 + 低門檻選項
-  if (classStats && classStats.todayUniqueUsers > 0) {
-    return `${name}，今天你們班已經有 ${classStats.todayUniqueUsers} 個人跟我聊過了 😊\n\n回覆數字就好：\n1. 今天有照菜肉飯順序吃\n2. 今天有吃到兩拳頭蔬菜\n3. 今天有走超過 5000 步`;
   }
 
   // 沉默 2-6 天 + 有目標：帶目標追蹤（多句隨機）
@@ -800,13 +795,9 @@ async function handleEveningPush(sb, r, users, classMap, now) {
       continue; // 推了回顧就不推沉默
     }
 
-    // === 一般沉默推播（帶目標 + 班級數據 + 知識題） ===
+    // === 一般沉默推播（個人目標追蹤 + 日常關心／知識題，不播報每日聊天人數） ===
     const activeGoal = await getActiveGoal(userId);
-    let silentClassStats = null;
-    if (daysSilent < 7 && user.class_name) {
-      try { silentClassStats = await getClassStats(user.class_name); } catch (_) {}
-    }
-    const silentResult = getSilentMessage(daysSilent, name, activeGoal?.goal_text, courseWeek, silentClassStats);
+    const silentResult = getSilentMessage(daysSilent, name, activeGoal?.goal_text, courseWeek);
     const silentText = typeof silentResult === 'object' ? silentResult.text : silentResult;
 
     try {
